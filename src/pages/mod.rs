@@ -1,3 +1,3 @@
-pub mod advanced;
-pub mod general;
-pub mod gestures;
+pub mod touchscreen;
+pub mod touchpad;
+pub mod widgets;
