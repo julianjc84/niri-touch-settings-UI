@@ -413,7 +413,7 @@ pub fn write_touchscreen_settings(settings: &TouchscreenSettings) {
     input_children.nodes_mut().push(ts_node);
     doc.nodes_mut().push(input_node);
 
-    write_config_file(&touchscreen_config_path(), &doc);
+    write_config_file(&touchscreen_config_path(), &mut doc);
 }
 
 // ---------------------------------------------------------------------------
@@ -481,7 +481,7 @@ pub fn write_touchpad_settings(settings: &TouchpadSettings) {
     input_children.nodes_mut().push(tp_node);
     doc.nodes_mut().push(input_node);
 
-    write_config_file(&touchpad_config_path(), &doc);
+    write_config_file(&touchpad_config_path(), &mut doc);
 }
 
 // ---------------------------------------------------------------------------
@@ -504,7 +504,8 @@ fn write_gesture_action(doc: &mut KdlDocument, name: &str, action: &GestureActio
     children.nodes_mut().push(fc_node);
 
     let mut sens_node = KdlNode::new("sensitivity");
-    sens_node.push(kdl::KdlEntry::new(KdlValue::Float(action.sensitivity)));
+    let rounded_sens = (action.sensitivity * 100.0).round() / 100.0;
+    sens_node.push(kdl::KdlEntry::new(KdlValue::Float(rounded_sens)));
     children.nodes_mut().push(sens_node);
 
     doc.nodes_mut().push(node);
@@ -512,7 +513,8 @@ fn write_gesture_action(doc: &mut KdlDocument, name: &str, action: &GestureActio
 
 fn write_threshold(doc: &mut KdlDocument, threshold: f64) {
     let mut node = KdlNode::new("recognition-threshold");
-    node.push(kdl::KdlEntry::new(KdlValue::Float(threshold)));
+    let rounded_threshold = (threshold * 100.0).round() / 100.0;
+    node.push(kdl::KdlEntry::new(KdlValue::Float(rounded_threshold)));
     doc.nodes_mut().push(node);
 }
 
@@ -524,21 +526,24 @@ fn write_string_node(doc: &mut KdlDocument, name: &str, value: &str) {
     let mut fmt = kdl::KdlEntryFormat::default();
     fmt.leading = " ".into();
     fmt.value_repr = format!("\"{}\"", value);
+    fmt.autoformat_keep = true;
     entry.set_format(fmt);
     node.push(entry);
     doc.nodes_mut().push(node);
 }
 
 fn write_float_node(doc: &mut KdlDocument, name: &str, value: f64) {
+    let rounded = (value * 100.0).round() / 100.0;
     let mut node = KdlNode::new(name);
-    node.push(kdl::KdlEntry::new(KdlValue::Float(value)));
+    node.push(kdl::KdlEntry::new(KdlValue::Float(rounded)));
     doc.nodes_mut().push(node);
 }
 
-fn write_config_file(path: &PathBuf, doc: &KdlDocument) {
+fn write_config_file(path: &PathBuf, doc: &mut KdlDocument) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
+    doc.autoformat();
     fs::write(path, doc.to_string()).expect("failed to write config");
 }
 
