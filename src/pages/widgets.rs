@@ -12,6 +12,7 @@ pub fn build_gesture_group(
     action: &GestureAction,
     on_change: Rc<dyn Fn()>,
     action_ref: Rc<RefCell<GestureAction>>,
+    show_natural_scroll: bool,
 ) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder()
         .title(title)
@@ -78,22 +79,23 @@ pub fn build_gesture_group(
     }
     group.add(&sens_row);
 
-    // Natural scroll.
-    let natural_row = adw::SwitchRow::builder()
-        .title("Natural Scroll")
-        .subtitle("Invert direction for this gesture")
-        .active(action.natural_scroll)
-        .build();
+    if show_natural_scroll {
+        let natural_row = adw::SwitchRow::builder()
+            .title("Natural Scroll")
+            .subtitle("Invert direction for this gesture")
+            .active(action.natural_scroll)
+            .build();
 
-    {
-        let action_ref = action_ref.clone();
-        let on_change = on_change.clone();
-        natural_row.connect_active_notify(move |row| {
-            action_ref.borrow_mut().natural_scroll = row.is_active();
-            on_change();
-        });
+        {
+            let action_ref = action_ref.clone();
+            let on_change = on_change.clone();
+            natural_row.connect_active_notify(move |row| {
+                action_ref.borrow_mut().natural_scroll = row.is_active();
+                on_change();
+            });
+        }
+        group.add(&natural_row);
     }
-    group.add(&natural_row);
 
     group
 }

@@ -97,19 +97,21 @@ fn build_gestures(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preferenc
     page.add(&info);
 
     page.add(&widgets::build_gesture_group(
-        "Workspace Switch",
-        "Vertical swipe to switch workspaces",
-        &settings.borrow().workspace_switch,
-        save.clone(),
-        ws_action,
-    ));
-
-    page.add(&widgets::build_gesture_group(
         "View Scroll",
         "Horizontal swipe to scroll between columns",
         &settings.borrow().view_scroll,
         save.clone(),
         vs_action,
+        true,
+    ));
+
+    page.add(&widgets::build_gesture_group(
+        "Workspace Switch",
+        "Vertical swipe to switch workspaces",
+        &settings.borrow().workspace_switch,
+        save.clone(),
+        ws_action,
+        true,
     ));
 
     page.add(&widgets::build_gesture_group(
@@ -118,6 +120,7 @@ fn build_gestures(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preferenc
         &settings.borrow().overview_toggle,
         save.clone(),
         ov_action,
+        true,
     ));
 
     page

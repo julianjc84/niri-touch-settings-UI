@@ -4,10 +4,13 @@ use std::path::PathBuf;
 use kdl::{KdlDocument, KdlNode, KdlValue};
 
 const TOUCHSCREEN_GESTURES_FILE: &str = "touchscreen-gestures.kdl";
-const TOUCHSCREEN_INCLUDE: &str = "include \"touchscreen-gestures.kdl\" optional=true\n";
-
 const TOUCHPAD_GESTURES_FILE: &str = "touchpad-gestures.kdl";
-const TOUCHPAD_INCLUDE: &str = "include \"touchpad-gestures.kdl\" optional=true\n";
+
+const INCLUDE_BLOCK: &str = "\
+// Includes override existing sections.\n\
+// Settings in these files replace the corresponding blocks in this config.\n\
+include \"touchscreen-gestures.kdl\" optional=true\n\
+include \"touchpad-gestures.kdl\" optional=true\n";
 
 // ---------------------------------------------------------------------------
 // Shared gesture action type
@@ -71,6 +74,26 @@ impl Default for TouchscreenSettings {
 
 #[derive(Debug, Clone)]
 pub struct TouchpadSettings {
+    // Device settings
+    pub off: bool,
+    pub tap: bool,
+    pub dwt: bool,
+    pub dwtp: bool,
+    pub drag: Option<bool>,
+    pub drag_lock: bool,
+    pub natural_scroll: bool,
+    pub click_method: Option<String>,
+    pub accel_speed: f64,
+    pub accel_profile: Option<String>,
+    pub scroll_method: Option<String>,
+    pub scroll_button: Option<u32>,
+    pub scroll_button_lock: bool,
+    pub tap_button_map: Option<String>,
+    pub left_handed: bool,
+    pub disabled_on_external_mouse: bool,
+    pub middle_emulation: bool,
+    pub scroll_factor: Option<f64>,
+    // Gesture settings
     pub workspace_switch: GestureAction,
     pub view_scroll: GestureAction,
     pub overview_toggle: GestureAction,
@@ -80,6 +103,24 @@ pub struct TouchpadSettings {
 impl Default for TouchpadSettings {
     fn default() -> Self {
         Self {
+            off: false,
+            tap: false,
+            dwt: false,
+            dwtp: false,
+            drag: None,
+            drag_lock: false,
+            natural_scroll: false,
+            click_method: None,
+            accel_speed: 0.0,
+            accel_profile: None,
+            scroll_method: None,
+            scroll_button: None,
+            scroll_button_lock: false,
+            tap_button_map: None,
+            left_handed: false,
+            disabled_on_external_mouse: false,
+            middle_emulation: false,
+            scroll_factor: None,
             workspace_switch: GestureAction {
                 enabled: true,
                 finger_count: 3,
@@ -149,23 +190,20 @@ pub fn ensure_includes() {
     let main_path = main_config_path();
     let content = fs::read_to_string(&main_path).unwrap_or_default();
 
-    let mut additions = String::new();
+    let has_touchscreen = content.contains("touchscreen-gestures.kdl") || content.contains("touch-gestures.kdl");
+    let has_touchpad = content.contains("touchpad-gestures.kdl");
 
-    if !content.contains("touchscreen-gestures.kdl") && !content.contains("touch-gestures.kdl") {
-        additions.push_str(TOUCHSCREEN_INCLUDE);
-    }
-    if !content.contains("touchpad-gestures.kdl") {
-        additions.push_str(TOUCHPAD_INCLUDE);
+    if has_touchscreen && has_touchpad {
+        return;
     }
 
-    if !additions.is_empty() {
-        let new_content = if content.ends_with('\n') {
-            format!("{content}\n{additions}")
-        } else {
-            format!("{content}\n\n{additions}")
-        };
-        fs::write(&main_path, new_content).expect("failed to update main config");
-    }
+    // Add the full include block if either is missing.
+    let new_content = if content.ends_with('\n') {
+        format!("{content}\n{INCLUDE_BLOCK}")
+    } else {
+        format!("{content}\n\n{INCLUDE_BLOCK}")
+    };
+    fs::write(&main_path, new_content).expect("failed to update main config");
 }
 
 // ---------------------------------------------------------------------------
@@ -228,13 +266,35 @@ fn parse_touchpad_settings(content: &str) -> TouchpadSettings {
     let Some(tp_node) = input_children.get("touchpad") else { return settings };
     let Some(tp_children) = tp_node.children() else { return settings };
 
-    let Some(gestures_node) = tp_children.get("gestures") else { return settings };
-    let Some(gestures_children) = gestures_node.children() else { return settings };
+    // Device settings
+    settings.off = tp_children.get("off").is_some();
+    settings.tap = tp_children.get("tap").is_some();
+    settings.dwt = tp_children.get("dwt").is_some();
+    settings.dwtp = tp_children.get("dwtp").is_some();
+    settings.drag = read_optional_bool(tp_children, "drag");
+    settings.drag_lock = tp_children.get("drag-lock").is_some();
+    settings.natural_scroll = tp_children.get("natural-scroll").is_some();
+    settings.click_method = read_string_arg(tp_children, "click-method");
+    settings.accel_speed = read_float_arg(tp_children, "accel-speed").unwrap_or(0.0);
+    settings.accel_profile = read_string_arg(tp_children, "accel-profile");
+    settings.scroll_method = read_string_arg(tp_children, "scroll-method");
+    settings.scroll_button = read_int_arg(tp_children, "scroll-button").map(|v| v as u32);
+    settings.scroll_button_lock = tp_children.get("scroll-button-lock").is_some();
+    settings.tap_button_map = read_string_arg(tp_children, "tap-button-map");
+    settings.left_handed = tp_children.get("left-handed").is_some();
+    settings.disabled_on_external_mouse = tp_children.get("disabled-on-external-mouse").is_some();
+    settings.middle_emulation = tp_children.get("middle-emulation").is_some();
+    settings.scroll_factor = read_float_arg(tp_children, "scroll-factor");
 
-    read_gesture_action(gestures_children, "workspace-switch", &mut settings.workspace_switch);
-    read_gesture_action(gestures_children, "view-scroll", &mut settings.view_scroll);
-    read_gesture_action(gestures_children, "overview-toggle", &mut settings.overview_toggle);
-    read_threshold(gestures_children, &mut settings.recognition_threshold);
+    // Gesture settings
+    if let Some(gestures_node) = tp_children.get("gestures") {
+        if let Some(gestures_children) = gestures_node.children() {
+            read_gesture_action(gestures_children, "workspace-switch", &mut settings.workspace_switch);
+            read_gesture_action(gestures_children, "view-scroll", &mut settings.view_scroll);
+            read_gesture_action(gestures_children, "overview-toggle", &mut settings.overview_toggle);
+            read_threshold(gestures_children, &mut settings.recognition_threshold);
+        }
+    }
 
     settings
 }
@@ -271,6 +331,37 @@ fn read_gesture_action(doc: &KdlDocument, name: &str, action: &mut GestureAction
 
     if children.get("natural-scroll").is_some() {
         action.natural_scroll = true;
+    }
+}
+
+fn read_string_arg(doc: &KdlDocument, name: &str) -> Option<String> {
+    let node = doc.get(name)?;
+    let entry = node.entries().first()?;
+    entry.value().as_string().map(|s| s.to_string())
+}
+
+fn read_float_arg(doc: &KdlDocument, name: &str) -> Option<f64> {
+    let node = doc.get(name)?;
+    let entry = node.entries().first()?;
+    if let Some(v) = entry.value().as_float() {
+        Some(v)
+    } else {
+        entry.value().as_integer().map(|v| v as f64)
+    }
+}
+
+fn read_int_arg(doc: &KdlDocument, name: &str) -> Option<i128> {
+    let node = doc.get(name)?;
+    let entry = node.entries().first()?;
+    entry.value().as_integer()
+}
+
+fn read_optional_bool(doc: &KdlDocument, name: &str) -> Option<bool> {
+    let node = doc.get(name)?;
+    if let Some(entry) = node.entries().first() {
+        entry.value().as_bool()
+    } else {
+        Some(true)
     }
 }
 
@@ -337,6 +428,47 @@ pub fn write_touchpad_settings(settings: &TouchpadSettings) {
     let mut tp_node = KdlNode::new("touchpad");
     let tp_children = tp_node.ensure_children();
 
+    // Device settings — bool flags
+    if settings.off { tp_children.nodes_mut().push(KdlNode::new("off")); }
+    if settings.tap { tp_children.nodes_mut().push(KdlNode::new("tap")); }
+    if settings.dwt { tp_children.nodes_mut().push(KdlNode::new("dwt")); }
+    if settings.dwtp { tp_children.nodes_mut().push(KdlNode::new("dwtp")); }
+    if let Some(drag) = settings.drag {
+        let mut node = KdlNode::new("drag");
+        node.push(kdl::KdlEntry::new(KdlValue::Bool(drag)));
+        tp_children.nodes_mut().push(node);
+    }
+    if settings.drag_lock { tp_children.nodes_mut().push(KdlNode::new("drag-lock")); }
+    if settings.natural_scroll { tp_children.nodes_mut().push(KdlNode::new("natural-scroll")); }
+    if let Some(ref method) = settings.click_method {
+        write_string_node(tp_children, "click-method", method);
+    }
+    if settings.accel_speed != 0.0 {
+        write_float_node(tp_children, "accel-speed", settings.accel_speed);
+    }
+    if let Some(ref profile) = settings.accel_profile {
+        write_string_node(tp_children, "accel-profile", profile);
+    }
+    if let Some(ref method) = settings.scroll_method {
+        write_string_node(tp_children, "scroll-method", method);
+    }
+    if let Some(button) = settings.scroll_button {
+        let mut node = KdlNode::new("scroll-button");
+        node.push(kdl::KdlEntry::new(KdlValue::Integer(button as i128)));
+        tp_children.nodes_mut().push(node);
+    }
+    if settings.scroll_button_lock { tp_children.nodes_mut().push(KdlNode::new("scroll-button-lock")); }
+    if let Some(ref map) = settings.tap_button_map {
+        write_string_node(tp_children, "tap-button-map", map);
+    }
+    if settings.left_handed { tp_children.nodes_mut().push(KdlNode::new("left-handed")); }
+    if settings.disabled_on_external_mouse { tp_children.nodes_mut().push(KdlNode::new("disabled-on-external-mouse")); }
+    if settings.middle_emulation { tp_children.nodes_mut().push(KdlNode::new("middle-emulation")); }
+    if let Some(factor) = settings.scroll_factor {
+        write_float_node(tp_children, "scroll-factor", factor);
+    }
+
+    // Gesture settings
     let mut gestures_node = KdlNode::new("gestures");
     let gestures_children = gestures_node.ensure_children();
 
@@ -381,6 +513,25 @@ fn write_gesture_action(doc: &mut KdlDocument, name: &str, action: &GestureActio
 fn write_threshold(doc: &mut KdlDocument, threshold: f64) {
     let mut node = KdlNode::new("recognition-threshold");
     node.push(kdl::KdlEntry::new(KdlValue::Float(threshold)));
+    doc.nodes_mut().push(node);
+}
+
+fn write_string_node(doc: &mut KdlDocument, name: &str, value: &str) {
+    let mut node = KdlNode::new(name);
+    let mut entry = kdl::KdlEntry::new(KdlValue::String(value.to_string()));
+    // Force quoted output — KDL v6 outputs bare identifiers for simple strings,
+    // but niri's knuffel parser requires quoted strings.
+    let mut fmt = kdl::KdlEntryFormat::default();
+    fmt.leading = " ".into();
+    fmt.value_repr = format!("\"{}\"", value);
+    entry.set_format(fmt);
+    node.push(entry);
+    doc.nodes_mut().push(node);
+}
+
+fn write_float_node(doc: &mut KdlDocument, name: &str, value: f64) {
+    let mut node = KdlNode::new(name);
+    node.push(kdl::KdlEntry::new(KdlValue::Float(value)));
     doc.nodes_mut().push(node);
 }
 

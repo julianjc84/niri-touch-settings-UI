@@ -29,8 +29,10 @@ fn build_ui(app: &adw::Application) {
 
     // Top-level device switcher: Touchscreen | Touchpad
     let view_stack = adw::ViewStack::new();
-    view_stack.add_titled(&pages::touchscreen::build(), Some("touchscreen"), "Touchscreen");
-    view_stack.add_titled(&pages::touchpad::build(), Some("touchpad"), "Touchpad");
+    let ts_page = view_stack.add_titled(&pages::touchscreen::build(), Some("touchscreen"), "Touchscreen");
+    ts_page.set_icon_name(Some("input-touchscreen-symbolic"));
+    let tp_page = view_stack.add_titled(&pages::touchpad::build(), Some("touchpad"), "Touchpad");
+    tp_page.set_icon_name(Some("input-touchpad-symbolic"));
 
     let switcher = adw::ViewSwitcher::new();
     switcher.set_stack(Some(&view_stack));
