@@ -25,6 +25,27 @@ pub struct GestureAction {
 }
 
 // ---------------------------------------------------------------------------
+// Edge swipe settings
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct EdgeSwipeSettings {
+    pub enabled: bool,
+    pub action: String,       // "view-scroll", "workspace-switch", "overview-toggle"
+    pub sensitivity: f64,
+}
+
+impl Default for EdgeSwipeSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            action: String::new(),
+            sensitivity: 0.4,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Touchscreen settings
 // ---------------------------------------------------------------------------
 
@@ -37,6 +58,11 @@ pub struct TouchscreenSettings {
     pub view_scroll: GestureAction,
     pub overview_toggle: GestureAction,
     pub recognition_threshold: f64,
+    pub edge_threshold: f64,
+    pub edge_swipe_left: EdgeSwipeSettings,
+    pub edge_swipe_right: EdgeSwipeSettings,
+    pub edge_swipe_top: EdgeSwipeSettings,
+    pub edge_swipe_bottom: EdgeSwipeSettings,
 }
 
 impl Default for TouchscreenSettings {
@@ -64,6 +90,11 @@ impl Default for TouchscreenSettings {
                 natural_scroll: false,
             },
             recognition_threshold: 16.0,
+            edge_threshold: 20.0,
+            edge_swipe_left: EdgeSwipeSettings::default(),
+            edge_swipe_right: EdgeSwipeSettings::default(),
+            edge_swipe_top: EdgeSwipeSettings::default(),
+            edge_swipe_bottom: EdgeSwipeSettings::default(),
         }
     }
 }
@@ -244,6 +275,14 @@ fn parse_touchscreen_settings(content: &str) -> TouchscreenSettings {
     read_gesture_action(gestures_children, "overview-toggle", &mut settings.overview_toggle);
     read_threshold(gestures_children, &mut settings.recognition_threshold);
 
+    if let Some(v) = read_float_arg(gestures_children, "edge-threshold") {
+        settings.edge_threshold = v;
+    }
+    read_edge_swipe(gestures_children, "edge-swipe-left", &mut settings.edge_swipe_left);
+    read_edge_swipe(gestures_children, "edge-swipe-right", &mut settings.edge_swipe_right);
+    read_edge_swipe(gestures_children, "edge-swipe-top", &mut settings.edge_swipe_top);
+    read_edge_swipe(gestures_children, "edge-swipe-bottom", &mut settings.edge_swipe_bottom);
+
     settings
 }
 
@@ -365,6 +404,34 @@ fn read_optional_bool(doc: &KdlDocument, name: &str) -> Option<bool> {
     }
 }
 
+fn read_edge_swipe(doc: &KdlDocument, name: &str, edge: &mut EdgeSwipeSettings) {
+    let Some(node) = doc.get(name) else { return };
+
+    // The action is the first string argument: edge-swipe-left "view-scroll"
+    if let Some(entry) = node.entries().first() {
+        if let Some(s) = entry.value().as_string() {
+            edge.action = s.to_string();
+            edge.enabled = true;
+        }
+    }
+
+    // Optional child properties: sensitivity, off
+    if let Some(children) = node.children() {
+        if children.get("off").is_some() {
+            edge.enabled = false;
+        }
+        if let Some(sens_node) = children.get("sensitivity") {
+            if let Some(entry) = sens_node.entries().first() {
+                if let Some(v) = entry.value().as_float() {
+                    edge.sensitivity = v;
+                } else if let Some(v) = entry.value().as_integer() {
+                    edge.sensitivity = v as f64;
+                }
+            }
+        }
+    }
+}
+
 fn read_threshold(doc: &KdlDocument, threshold: &mut f64) {
     if let Some(node) = doc.get("recognition-threshold") {
         if let Some(entry) = node.entries().first() {
@@ -408,6 +475,12 @@ pub fn write_touchscreen_settings(settings: &TouchscreenSettings) {
     write_gesture_action(gestures_children, "view-scroll", &settings.view_scroll);
     write_gesture_action(gestures_children, "overview-toggle", &settings.overview_toggle);
     write_threshold(gestures_children, settings.recognition_threshold);
+
+    write_float_node(gestures_children, "edge-threshold", settings.edge_threshold);
+    write_edge_swipe(gestures_children, "edge-swipe-left", &settings.edge_swipe_left);
+    write_edge_swipe(gestures_children, "edge-swipe-right", &settings.edge_swipe_right);
+    write_edge_swipe(gestures_children, "edge-swipe-top", &settings.edge_swipe_top);
+    write_edge_swipe(gestures_children, "edge-swipe-bottom", &settings.edge_swipe_bottom);
 
     ts_children.nodes_mut().push(gestures_node);
     input_children.nodes_mut().push(ts_node);
@@ -515,6 +588,41 @@ fn write_threshold(doc: &mut KdlDocument, threshold: f64) {
     let mut node = KdlNode::new("recognition-threshold");
     let rounded_threshold = (threshold * 100.0).round() / 100.0;
     node.push(kdl::KdlEntry::new(KdlValue::Float(rounded_threshold)));
+    doc.nodes_mut().push(node);
+}
+
+fn write_edge_swipe(doc: &mut KdlDocument, name: &str, edge: &EdgeSwipeSettings) {
+    // Only write if the edge has an action configured.
+    if edge.action.is_empty() {
+        return;
+    }
+
+    let mut node = KdlNode::new(name);
+
+    // Write the action as a quoted string argument.
+    let mut entry = kdl::KdlEntry::new(KdlValue::String(edge.action.clone()));
+    let mut fmt = kdl::KdlEntryFormat::default();
+    fmt.leading = " ".into();
+    fmt.value_repr = format!("\"{}\"", edge.action);
+    fmt.autoformat_keep = true;
+    entry.set_format(fmt);
+    node.push(entry);
+
+    // Write child properties if non-default.
+    let has_children = !edge.enabled || edge.sensitivity != 0.4;
+    if has_children {
+        let children = node.ensure_children();
+        if !edge.enabled {
+            children.nodes_mut().push(KdlNode::new("off"));
+        }
+        if (edge.sensitivity - 0.4).abs() > 0.001 {
+            let mut sens_node = KdlNode::new("sensitivity");
+            let rounded = (edge.sensitivity * 100.0).round() / 100.0;
+            sens_node.push(kdl::KdlEntry::new(KdlValue::Float(rounded)));
+            children.nodes_mut().push(sens_node);
+        }
+    }
+
     doc.nodes_mut().push(node);
 }
 

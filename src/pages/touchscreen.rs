@@ -2,7 +2,7 @@ use adw::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::config::{self, TouchscreenSettings};
+use crate::config::{self, EdgeSwipeSettings, TouchscreenSettings};
 use super::widgets;
 
 pub fn build() -> gtk::Box {
@@ -11,7 +11,7 @@ pub fn build() -> gtk::Box {
     let stack = gtk::Stack::new();
     stack.add_titled(&build_general(&settings), Some("general"), "General");
     stack.add_titled(&build_gestures(&settings), Some("gestures"), "Gestures");
-    stack.add_titled(&build_advanced(&settings), Some("advanced"), "Advanced");
+    stack.add_titled(&build_edge_swipes(&settings), Some("edge-swipes"), "Edge Swipes");
 
     let switcher = gtk::StackSwitcher::new();
     switcher.set_stack(Some(&stack));
@@ -66,6 +66,17 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
     group.add(&output_row);
 
     page.add(&group);
+
+    // Recognition threshold — applies to both gestures and edge swipes.
+    let settings_clone = settings.clone();
+    page.add(&widgets::build_threshold_row(
+        settings.borrow().recognition_threshold,
+        move |val| {
+            settings_clone.borrow_mut().recognition_threshold = val;
+            save_and_reload(&settings_clone.borrow());
+        },
+    ));
+
     page
 }
 
@@ -118,7 +129,7 @@ fn build_gestures(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preferenc
         "Overview Toggle",
         "Vertical swipe to open/close overview",
         &settings.borrow().overview_toggle,
-        save.clone(),
+        save,
         ov_action,
         true,
     ));
@@ -126,18 +137,162 @@ fn build_gestures(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preferenc
     page
 }
 
-fn build_advanced(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::PreferencesPage {
+fn build_edge_swipes(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder().build();
 
-    let settings_clone = settings.clone();
-    page.add(&widgets::build_threshold_row(
-        settings.borrow().recognition_threshold,
-        move |val| {
-            settings_clone.borrow_mut().recognition_threshold = val;
-            config::write_touchscreen_settings(&settings_clone.borrow());
-            config::reload_config();
-        },
-    ));
+    let info = adw::PreferencesGroup::builder()
+        .description("Edge swipes trigger when swiping from a screen edge. Assign each edge an action or leave empty to disable.")
+        .build();
+    page.add(&info);
+
+    // Edge threshold
+    {
+        let threshold_group = adw::PreferencesGroup::builder()
+            .title("Edge Zone")
+            .build();
+
+        let threshold_row = adw::SpinRow::builder()
+            .title("Edge Threshold")
+            .subtitle("Pixels from screen edge that count as the edge zone")
+            .adjustment(&gtk::Adjustment::new(
+                settings.borrow().edge_threshold,
+                5.0,
+                100.0,
+                1.0,
+                5.0,
+                0.0,
+            ))
+            .build();
+
+        {
+            let settings = settings.clone();
+            threshold_row.connect_value_notify(move |row| {
+                settings.borrow_mut().edge_threshold = row.value();
+                save_and_reload(&settings.borrow());
+            });
+        }
+
+        threshold_group.add(&threshold_row);
+        page.add(&threshold_group);
+    }
+
+    // One group per edge
+    let edges = [
+        ("Left Edge", "edge_swipe_left", "Swipe right from the left edge"),
+        ("Right Edge", "edge_swipe_right", "Swipe left from the right edge"),
+        ("Top Edge", "edge_swipe_top", "Swipe down from the top edge"),
+        ("Bottom Edge", "edge_swipe_bottom", "Swipe up from the bottom edge"),
+    ];
+
+    for (title, field, description) in edges {
+        let edge_settings = Rc::new(RefCell::new(get_edge_field(&settings.borrow(), field)));
+        let group = build_edge_swipe_group(
+            title,
+            description,
+            &edge_settings,
+            settings.clone(),
+            field.to_string(),
+        );
+        page.add(&group);
+    }
 
     page
 }
+
+fn get_edge_field(settings: &TouchscreenSettings, field: &str) -> EdgeSwipeSettings {
+    match field {
+        "edge_swipe_left" => settings.edge_swipe_left.clone(),
+        "edge_swipe_right" => settings.edge_swipe_right.clone(),
+        "edge_swipe_top" => settings.edge_swipe_top.clone(),
+        "edge_swipe_bottom" => settings.edge_swipe_bottom.clone(),
+        _ => EdgeSwipeSettings::default(),
+    }
+}
+
+fn set_edge_field(settings: &mut TouchscreenSettings, field: &str, edge: &EdgeSwipeSettings) {
+    match field {
+        "edge_swipe_left" => settings.edge_swipe_left = edge.clone(),
+        "edge_swipe_right" => settings.edge_swipe_right = edge.clone(),
+        "edge_swipe_top" => settings.edge_swipe_top = edge.clone(),
+        "edge_swipe_bottom" => settings.edge_swipe_bottom = edge.clone(),
+        _ => {}
+    }
+}
+
+fn build_edge_swipe_group(
+    title: &str,
+    description: &str,
+    edge: &Rc<RefCell<EdgeSwipeSettings>>,
+    settings: Rc<RefCell<TouchscreenSettings>>,
+    field: String,
+) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder()
+        .title(title)
+        .description(description)
+        .build();
+
+    let actions = ["", "view-scroll", "workspace-switch", "overview-toggle"];
+    let labels = ["Disabled", "View Scroll", "Workspace Switch", "Overview Toggle"];
+
+    let current_action = edge.borrow().action.clone();
+    let active_idx = actions.iter().position(|a| *a == current_action).unwrap_or(0) as u32;
+
+    let string_list = gtk::StringList::new(&labels);
+    let action_row = adw::ComboRow::builder()
+        .title("Action")
+        .model(&string_list)
+        .selected(active_idx)
+        .build();
+
+    {
+        let edge = edge.clone();
+        let settings = settings.clone();
+        let field = field.clone();
+        action_row.connect_selected_notify(move |row| {
+            let idx = row.selected() as usize;
+            let action = actions[idx].to_string();
+            let mut e = edge.borrow_mut();
+            e.action = action.clone();
+            e.enabled = !action.is_empty();
+            set_edge_field(&mut settings.borrow_mut(), &field, &e);
+            save_and_reload(&settings.borrow());
+        });
+    }
+    group.add(&action_row);
+
+    // Sensitivity
+    let sens_row = adw::SpinRow::builder()
+        .title("Sensitivity")
+        .subtitle("Speed multiplier for the gesture")
+        .adjustment(&gtk::Adjustment::new(
+            edge.borrow().sensitivity,
+            0.1,
+            5.0,
+            0.1,
+            0.5,
+            0.0,
+        ))
+        .digits(1)
+        .build();
+
+    {
+        let edge = edge.clone();
+        let settings = settings.clone();
+        let field = field.clone();
+        sens_row.connect_value_notify(move |row| {
+            let mut e = edge.borrow_mut();
+            e.sensitivity = row.value();
+            set_edge_field(&mut settings.borrow_mut(), &field, &e);
+            save_and_reload(&settings.borrow());
+        });
+    }
+    group.add(&sens_row);
+
+    group
+}
+
+fn save_and_reload(settings: &TouchscreenSettings) {
+    config::write_touchscreen_settings(settings);
+    config::reload_config();
+}
+
