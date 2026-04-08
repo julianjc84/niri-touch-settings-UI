@@ -1,10 +1,25 @@
 use std::fs;
 use std::path::PathBuf;
 
-use kdl::{KdlDocument, KdlNode, KdlValue};
+use kdl::{KdlDocument, KdlEntry, KdlIdentifier, KdlNode, KdlValue};
 
 const TOUCHSCREEN_GESTURES_FILE: &str = "touchscreen-gestures.kdl";
 const TOUCHPAD_GESTURES_FILE: &str = "touchpad-gestures.kdl";
+
+// ---------------------------------------------------------------------------
+// KDL v1 <-> v2 compatibility
+// ---------------------------------------------------------------------------
+// The `kdl` crate v6 implements KDL v2, where booleans are `#true`/`#false`.
+// Niri's compositor uses `knuffel` which implements KDL v1 (`true`/`false`).
+// These helpers bridge the two specs for property values.
+
+fn kdl_v1_to_v2(content: &str) -> String {
+    content.replace("=true", "=#true").replace("=false", "=#false")
+}
+
+fn kdl_v2_to_v1(content: &str) -> String {
+    content.replace("=#true", "=true").replace("=#false", "=false")
+}
 
 const INCLUDE_BLOCK: &str = "\
 // Includes override existing sections.\n\
@@ -13,36 +28,21 @@ include \"touchscreen-gestures.kdl\" optional=true\n\
 include \"touchpad-gestures.kdl\" optional=true\n";
 
 // ---------------------------------------------------------------------------
-// Shared gesture action type
+// Touch bind entry (touchscreen dynamic binds)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
-pub struct GestureAction {
-    pub enabled: bool,
-    pub finger_count: u8,
-    pub sensitivity: f64,
+pub struct TouchBindEntry {
+    /// KDL node name, e.g. "Touch3SwipeUp", "TouchEdgeLeft"
+    pub gesture_name: String,
+    /// Action KDL name, e.g. "focus-workspace-up", "close-window", "spawn"
+    pub action_name: String,
+    /// Arguments for actions that take them (e.g. spawn "alacritty")
+    pub action_args: Vec<String>,
+    /// Sensitivity multiplier (only meaningful for continuous actions)
+    pub sensitivity: Option<f64>,
+    /// Natural scroll toggle
     pub natural_scroll: bool,
-}
-
-// ---------------------------------------------------------------------------
-// Edge swipe settings
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct EdgeSwipeSettings {
-    pub enabled: bool,
-    pub action: String,       // "view-scroll", "workspace-switch", "overview-toggle"
-    pub sensitivity: f64,
-}
-
-impl Default for EdgeSwipeSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            action: String::new(),
-            sensitivity: 0.4,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -54,15 +54,15 @@ pub struct TouchscreenSettings {
     pub off: bool,
     pub natural_scroll: bool,
     pub map_to_output: Option<String>,
-    pub workspace_switch: GestureAction,
-    pub view_scroll: GestureAction,
-    pub overview_toggle: GestureAction,
+    // Detection thresholds
     pub recognition_threshold: f64,
     pub edge_threshold: f64,
-    pub edge_swipe_left: EdgeSwipeSettings,
-    pub edge_swipe_right: EdgeSwipeSettings,
-    pub edge_swipe_top: EdgeSwipeSettings,
-    pub edge_swipe_bottom: EdgeSwipeSettings,
+    pub pinch_threshold: f64,
+    pub pinch_ratio: f64,
+    pub pinch_sensitivity: f64,
+    pub finger_threshold_scale: f64,
+    // Dynamic touch binds
+    pub binds: Vec<TouchBindEntry>,
 }
 
 impl Default for TouchscreenSettings {
@@ -71,32 +71,27 @@ impl Default for TouchscreenSettings {
             off: false,
             natural_scroll: false,
             map_to_output: None,
-            workspace_switch: GestureAction {
-                enabled: true,
-                finger_count: 3,
-                sensitivity: 0.4,
-                natural_scroll: false,
-            },
-            view_scroll: GestureAction {
-                enabled: true,
-                finger_count: 3,
-                sensitivity: 0.4,
-                natural_scroll: false,
-            },
-            overview_toggle: GestureAction {
-                enabled: true,
-                finger_count: 4,
-                sensitivity: 0.4,
-                natural_scroll: false,
-            },
             recognition_threshold: 16.0,
             edge_threshold: 20.0,
-            edge_swipe_left: EdgeSwipeSettings::default(),
-            edge_swipe_right: EdgeSwipeSettings::default(),
-            edge_swipe_top: EdgeSwipeSettings::default(),
-            edge_swipe_bottom: EdgeSwipeSettings::default(),
+            pinch_threshold: 20.0,
+            pinch_ratio: 2.0,
+            pinch_sensitivity: 1.0,
+            finger_threshold_scale: 2.6,
+            binds: Vec::new(),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Shared gesture action type (used by touchpad)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct GestureAction {
+    pub enabled: bool,
+    pub finger_count: u8,
+    pub sensitivity: f64,
+    pub natural_scroll: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +243,8 @@ pub fn read_touchscreen_settings() -> TouchscreenSettings {
 }
 
 fn parse_touchscreen_settings(content: &str) -> TouchscreenSettings {
-    let doc: KdlDocument = content.parse().unwrap_or_default();
+    let v2_content = kdl_v1_to_v2(content);
+    let doc: KdlDocument = v2_content.parse().unwrap_or_default();
     let mut settings = TouchscreenSettings::default();
 
     let Some(input_node) = doc.get("input") else { return settings };
@@ -270,20 +266,166 @@ fn parse_touchscreen_settings(content: &str) -> TouchscreenSettings {
     let Some(gestures_node) = ts_children.get("gestures") else { return settings };
     let Some(gestures_children) = gestures_node.children() else { return settings };
 
-    read_gesture_action(gestures_children, "workspace-switch", &mut settings.workspace_switch);
-    read_gesture_action(gestures_children, "view-scroll", &mut settings.view_scroll);
-    read_gesture_action(gestures_children, "overview-toggle", &mut settings.overview_toggle);
-    read_threshold(gestures_children, &mut settings.recognition_threshold);
-
+    // Detection thresholds
+    if let Some(v) = read_float_arg(gestures_children, "recognition-threshold") {
+        settings.recognition_threshold = v;
+    }
     if let Some(v) = read_float_arg(gestures_children, "edge-threshold") {
         settings.edge_threshold = v;
     }
-    read_edge_swipe(gestures_children, "edge-swipe-left", &mut settings.edge_swipe_left);
-    read_edge_swipe(gestures_children, "edge-swipe-right", &mut settings.edge_swipe_right);
-    read_edge_swipe(gestures_children, "edge-swipe-top", &mut settings.edge_swipe_top);
-    read_edge_swipe(gestures_children, "edge-swipe-bottom", &mut settings.edge_swipe_bottom);
+    if let Some(v) = read_float_arg(gestures_children, "pinch-threshold") {
+        settings.pinch_threshold = v;
+    }
+    if let Some(v) = read_float_arg(gestures_children, "pinch-ratio") {
+        settings.pinch_ratio = v;
+    }
+    if let Some(v) = read_float_arg(gestures_children, "pinch-sensitivity") {
+        settings.pinch_sensitivity = v;
+    }
+    if let Some(v) = read_float_arg(gestures_children, "finger-threshold-scale") {
+        settings.finger_threshold_scale = v;
+    }
+
+    // Touch binds
+    if let Some(binds_node) = gestures_children.get("touch-binds") {
+        if let Some(binds_children) = binds_node.children() {
+            settings.binds = read_touch_binds(binds_children);
+        }
+    }
 
     settings
+}
+
+fn read_touch_binds(binds_doc: &KdlDocument) -> Vec<TouchBindEntry> {
+    let mut binds = Vec::new();
+
+    for node in binds_doc.nodes() {
+        let gesture_name = node.name().to_string();
+
+        // Read properties: sensitivity, natural-scroll
+        let sensitivity = node.get("sensitivity").and_then(|v| {
+            v.as_float().or_else(|| v.as_integer().map(|i| i as f64))
+        });
+        let natural_scroll = node
+            .get("natural-scroll")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // Read action from the single child node
+        let mut action_name = String::new();
+        let mut action_args = Vec::new();
+
+        if let Some(children) = node.children() {
+            if let Some(action_node) = children.nodes().first() {
+                action_name = action_node.name().to_string();
+                for entry in action_node.entries() {
+                    if entry.name().is_none() {
+                        if let Some(s) = entry.value().as_string() {
+                            action_args.push(s.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        if !action_name.is_empty() {
+            binds.push(TouchBindEntry {
+                gesture_name,
+                action_name,
+                action_args,
+                sensitivity,
+                natural_scroll,
+            });
+        }
+    }
+
+    binds
+}
+
+// ---------------------------------------------------------------------------
+// Write touchscreen settings
+// ---------------------------------------------------------------------------
+
+pub fn write_touchscreen_settings(settings: &TouchscreenSettings) {
+    let mut doc = KdlDocument::new();
+    let mut input_node = KdlNode::new("input");
+    let input_children = input_node.ensure_children();
+
+    let mut ts_node = KdlNode::new("touchscreen");
+    let ts_children = ts_node.ensure_children();
+
+    if settings.off {
+        ts_children.nodes_mut().push(KdlNode::new("off"));
+    }
+    if settings.natural_scroll {
+        ts_children.nodes_mut().push(KdlNode::new("natural-scroll"));
+    }
+    if let Some(ref output) = settings.map_to_output {
+        let mut node = KdlNode::new("map-to-output");
+        node.push(kdl::KdlEntry::new(KdlValue::String(output.clone())));
+        ts_children.nodes_mut().push(node);
+    }
+
+    let mut gestures_node = KdlNode::new("gestures");
+    let gestures_children = gestures_node.ensure_children();
+
+    // Detection thresholds
+    write_float_node(gestures_children, "recognition-threshold", settings.recognition_threshold);
+    write_float_node(gestures_children, "edge-threshold", settings.edge_threshold);
+    write_float_node(gestures_children, "pinch-threshold", settings.pinch_threshold);
+    write_float_node(gestures_children, "pinch-ratio", settings.pinch_ratio);
+    write_float_node(gestures_children, "pinch-sensitivity", settings.pinch_sensitivity);
+    write_float_node(gestures_children, "finger-threshold-scale", settings.finger_threshold_scale);
+
+    // Touch binds
+    write_touch_binds(gestures_children, &settings.binds);
+
+    ts_children.nodes_mut().push(gestures_node);
+    input_children.nodes_mut().push(ts_node);
+    doc.nodes_mut().push(input_node);
+
+    write_config_file(&touchscreen_config_path(), &mut doc);
+}
+
+fn write_touch_binds(gestures_doc: &mut KdlDocument, binds: &[TouchBindEntry]) {
+    let mut binds_node = KdlNode::new("touch-binds");
+    let binds_children = binds_node.ensure_children();
+
+    for bind in binds {
+        let mut node = KdlNode::new(bind.gesture_name.as_str());
+
+        // Properties: sensitivity and natural-scroll
+        if let Some(sens) = bind.sensitivity {
+            let rounded = (sens * 100.0).round() / 100.0;
+            let mut entry = KdlEntry::new(KdlValue::Float(rounded));
+            entry.set_name(Some(KdlIdentifier::from("sensitivity")));
+            node.push(entry);
+        }
+
+        if bind.natural_scroll {
+            let mut entry = KdlEntry::new(KdlValue::Bool(true));
+            entry.set_name(Some(KdlIdentifier::from("natural-scroll")));
+            node.push(entry);
+        }
+
+        // Action as child node
+        let action_children = node.ensure_children();
+        let mut action_node = KdlNode::new(bind.action_name.as_str());
+        for arg in &bind.action_args {
+            let mut entry = KdlEntry::new(KdlValue::String(arg.clone()));
+            let mut fmt = kdl::KdlEntryFormat::default();
+            fmt.leading = " ".into();
+            fmt.value_repr = format!("\"{}\"", arg);
+            fmt.autoformat_keep = true;
+            entry.set_format(fmt);
+            action_node.push(entry);
+        }
+        action_children.nodes_mut().push(action_node);
+
+        binds_children.nodes_mut().push(node);
+    }
+
+    gestures_doc.nodes_mut().push(binds_node);
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +478,74 @@ fn parse_touchpad_settings(content: &str) -> TouchpadSettings {
     }
 
     settings
+}
+
+// ---------------------------------------------------------------------------
+// Write touchpad settings
+// ---------------------------------------------------------------------------
+
+pub fn write_touchpad_settings(settings: &TouchpadSettings) {
+    let mut doc = KdlDocument::new();
+    let mut input_node = KdlNode::new("input");
+    let input_children = input_node.ensure_children();
+
+    let mut tp_node = KdlNode::new("touchpad");
+    let tp_children = tp_node.ensure_children();
+
+    // Device settings -- bool flags
+    if settings.off { tp_children.nodes_mut().push(KdlNode::new("off")); }
+    if settings.tap { tp_children.nodes_mut().push(KdlNode::new("tap")); }
+    if settings.dwt { tp_children.nodes_mut().push(KdlNode::new("dwt")); }
+    if settings.dwtp { tp_children.nodes_mut().push(KdlNode::new("dwtp")); }
+    if let Some(drag) = settings.drag {
+        let mut node = KdlNode::new("drag");
+        node.push(kdl::KdlEntry::new(KdlValue::Bool(drag)));
+        tp_children.nodes_mut().push(node);
+    }
+    if settings.drag_lock { tp_children.nodes_mut().push(KdlNode::new("drag-lock")); }
+    if settings.natural_scroll { tp_children.nodes_mut().push(KdlNode::new("natural-scroll")); }
+    if let Some(ref method) = settings.click_method {
+        write_string_node(tp_children, "click-method", method);
+    }
+    if settings.accel_speed != 0.0 {
+        write_float_node(tp_children, "accel-speed", settings.accel_speed);
+    }
+    if let Some(ref profile) = settings.accel_profile {
+        write_string_node(tp_children, "accel-profile", profile);
+    }
+    if let Some(ref method) = settings.scroll_method {
+        write_string_node(tp_children, "scroll-method", method);
+    }
+    if let Some(button) = settings.scroll_button {
+        let mut node = KdlNode::new("scroll-button");
+        node.push(kdl::KdlEntry::new(KdlValue::Integer(button as i128)));
+        tp_children.nodes_mut().push(node);
+    }
+    if settings.scroll_button_lock { tp_children.nodes_mut().push(KdlNode::new("scroll-button-lock")); }
+    if let Some(ref map) = settings.tap_button_map {
+        write_string_node(tp_children, "tap-button-map", map);
+    }
+    if settings.left_handed { tp_children.nodes_mut().push(KdlNode::new("left-handed")); }
+    if settings.disabled_on_external_mouse { tp_children.nodes_mut().push(KdlNode::new("disabled-on-external-mouse")); }
+    if settings.middle_emulation { tp_children.nodes_mut().push(KdlNode::new("middle-emulation")); }
+    if let Some(factor) = settings.scroll_factor {
+        write_float_node(tp_children, "scroll-factor", factor);
+    }
+
+    // Gesture settings
+    let mut gestures_node = KdlNode::new("gestures");
+    let gestures_children = gestures_node.ensure_children();
+
+    write_gesture_action(gestures_children, "workspace-switch", &settings.workspace_switch);
+    write_gesture_action(gestures_children, "view-scroll", &settings.view_scroll);
+    write_gesture_action(gestures_children, "overview-toggle", &settings.overview_toggle);
+    write_threshold(gestures_children, settings.recognition_threshold);
+
+    tp_children.nodes_mut().push(gestures_node);
+    input_children.nodes_mut().push(tp_node);
+    doc.nodes_mut().push(input_node);
+
+    write_config_file(&touchpad_config_path(), &mut doc);
 }
 
 // ---------------------------------------------------------------------------
@@ -404,34 +614,6 @@ fn read_optional_bool(doc: &KdlDocument, name: &str) -> Option<bool> {
     }
 }
 
-fn read_edge_swipe(doc: &KdlDocument, name: &str, edge: &mut EdgeSwipeSettings) {
-    let Some(node) = doc.get(name) else { return };
-
-    // The action is the first string argument: edge-swipe-left "view-scroll"
-    if let Some(entry) = node.entries().first() {
-        if let Some(s) = entry.value().as_string() {
-            edge.action = s.to_string();
-            edge.enabled = true;
-        }
-    }
-
-    // Optional child properties: sensitivity, off
-    if let Some(children) = node.children() {
-        if children.get("off").is_some() {
-            edge.enabled = false;
-        }
-        if let Some(sens_node) = children.get("sensitivity") {
-            if let Some(entry) = sens_node.entries().first() {
-                if let Some(v) = entry.value().as_float() {
-                    edge.sensitivity = v;
-                } else if let Some(v) = entry.value().as_integer() {
-                    edge.sensitivity = v as f64;
-                }
-            }
-        }
-    }
-}
-
 fn read_threshold(doc: &KdlDocument, threshold: &mut f64) {
     if let Some(node) = doc.get("recognition-threshold") {
         if let Some(entry) = node.entries().first() {
@@ -442,119 +624,6 @@ fn read_threshold(doc: &KdlDocument, threshold: &mut f64) {
             }
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Write touchscreen settings
-// ---------------------------------------------------------------------------
-
-pub fn write_touchscreen_settings(settings: &TouchscreenSettings) {
-    let mut doc = KdlDocument::new();
-    let mut input_node = KdlNode::new("input");
-    let input_children = input_node.ensure_children();
-
-    let mut ts_node = KdlNode::new("touchscreen");
-    let ts_children = ts_node.ensure_children();
-
-    if settings.off {
-        ts_children.nodes_mut().push(KdlNode::new("off"));
-    }
-    if settings.natural_scroll {
-        ts_children.nodes_mut().push(KdlNode::new("natural-scroll"));
-    }
-    if let Some(ref output) = settings.map_to_output {
-        let mut node = KdlNode::new("map-to-output");
-        node.push(kdl::KdlEntry::new(KdlValue::String(output.clone())));
-        ts_children.nodes_mut().push(node);
-    }
-
-    let mut gestures_node = KdlNode::new("gestures");
-    let gestures_children = gestures_node.ensure_children();
-
-    write_gesture_action(gestures_children, "workspace-switch", &settings.workspace_switch);
-    write_gesture_action(gestures_children, "view-scroll", &settings.view_scroll);
-    write_gesture_action(gestures_children, "overview-toggle", &settings.overview_toggle);
-    write_threshold(gestures_children, settings.recognition_threshold);
-
-    write_float_node(gestures_children, "edge-threshold", settings.edge_threshold);
-    write_edge_swipe(gestures_children, "edge-swipe-left", &settings.edge_swipe_left);
-    write_edge_swipe(gestures_children, "edge-swipe-right", &settings.edge_swipe_right);
-    write_edge_swipe(gestures_children, "edge-swipe-top", &settings.edge_swipe_top);
-    write_edge_swipe(gestures_children, "edge-swipe-bottom", &settings.edge_swipe_bottom);
-
-    ts_children.nodes_mut().push(gestures_node);
-    input_children.nodes_mut().push(ts_node);
-    doc.nodes_mut().push(input_node);
-
-    write_config_file(&touchscreen_config_path(), &mut doc);
-}
-
-// ---------------------------------------------------------------------------
-// Write touchpad settings
-// ---------------------------------------------------------------------------
-
-pub fn write_touchpad_settings(settings: &TouchpadSettings) {
-    let mut doc = KdlDocument::new();
-    let mut input_node = KdlNode::new("input");
-    let input_children = input_node.ensure_children();
-
-    let mut tp_node = KdlNode::new("touchpad");
-    let tp_children = tp_node.ensure_children();
-
-    // Device settings — bool flags
-    if settings.off { tp_children.nodes_mut().push(KdlNode::new("off")); }
-    if settings.tap { tp_children.nodes_mut().push(KdlNode::new("tap")); }
-    if settings.dwt { tp_children.nodes_mut().push(KdlNode::new("dwt")); }
-    if settings.dwtp { tp_children.nodes_mut().push(KdlNode::new("dwtp")); }
-    if let Some(drag) = settings.drag {
-        let mut node = KdlNode::new("drag");
-        node.push(kdl::KdlEntry::new(KdlValue::Bool(drag)));
-        tp_children.nodes_mut().push(node);
-    }
-    if settings.drag_lock { tp_children.nodes_mut().push(KdlNode::new("drag-lock")); }
-    if settings.natural_scroll { tp_children.nodes_mut().push(KdlNode::new("natural-scroll")); }
-    if let Some(ref method) = settings.click_method {
-        write_string_node(tp_children, "click-method", method);
-    }
-    if settings.accel_speed != 0.0 {
-        write_float_node(tp_children, "accel-speed", settings.accel_speed);
-    }
-    if let Some(ref profile) = settings.accel_profile {
-        write_string_node(tp_children, "accel-profile", profile);
-    }
-    if let Some(ref method) = settings.scroll_method {
-        write_string_node(tp_children, "scroll-method", method);
-    }
-    if let Some(button) = settings.scroll_button {
-        let mut node = KdlNode::new("scroll-button");
-        node.push(kdl::KdlEntry::new(KdlValue::Integer(button as i128)));
-        tp_children.nodes_mut().push(node);
-    }
-    if settings.scroll_button_lock { tp_children.nodes_mut().push(KdlNode::new("scroll-button-lock")); }
-    if let Some(ref map) = settings.tap_button_map {
-        write_string_node(tp_children, "tap-button-map", map);
-    }
-    if settings.left_handed { tp_children.nodes_mut().push(KdlNode::new("left-handed")); }
-    if settings.disabled_on_external_mouse { tp_children.nodes_mut().push(KdlNode::new("disabled-on-external-mouse")); }
-    if settings.middle_emulation { tp_children.nodes_mut().push(KdlNode::new("middle-emulation")); }
-    if let Some(factor) = settings.scroll_factor {
-        write_float_node(tp_children, "scroll-factor", factor);
-    }
-
-    // Gesture settings
-    let mut gestures_node = KdlNode::new("gestures");
-    let gestures_children = gestures_node.ensure_children();
-
-    write_gesture_action(gestures_children, "workspace-switch", &settings.workspace_switch);
-    write_gesture_action(gestures_children, "view-scroll", &settings.view_scroll);
-    write_gesture_action(gestures_children, "overview-toggle", &settings.overview_toggle);
-    write_threshold(gestures_children, settings.recognition_threshold);
-
-    tp_children.nodes_mut().push(gestures_node);
-    input_children.nodes_mut().push(tp_node);
-    doc.nodes_mut().push(input_node);
-
-    write_config_file(&touchpad_config_path(), &mut doc);
 }
 
 // ---------------------------------------------------------------------------
@@ -591,45 +660,10 @@ fn write_threshold(doc: &mut KdlDocument, threshold: f64) {
     doc.nodes_mut().push(node);
 }
 
-fn write_edge_swipe(doc: &mut KdlDocument, name: &str, edge: &EdgeSwipeSettings) {
-    // Only write if the edge has an action configured.
-    if edge.action.is_empty() {
-        return;
-    }
-
-    let mut node = KdlNode::new(name);
-
-    // Write the action as a quoted string argument.
-    let mut entry = kdl::KdlEntry::new(KdlValue::String(edge.action.clone()));
-    let mut fmt = kdl::KdlEntryFormat::default();
-    fmt.leading = " ".into();
-    fmt.value_repr = format!("\"{}\"", edge.action);
-    fmt.autoformat_keep = true;
-    entry.set_format(fmt);
-    node.push(entry);
-
-    // Write child properties if non-default.
-    let has_children = !edge.enabled || edge.sensitivity != 0.4;
-    if has_children {
-        let children = node.ensure_children();
-        if !edge.enabled {
-            children.nodes_mut().push(KdlNode::new("off"));
-        }
-        if (edge.sensitivity - 0.4).abs() > 0.001 {
-            let mut sens_node = KdlNode::new("sensitivity");
-            let rounded = (edge.sensitivity * 100.0).round() / 100.0;
-            sens_node.push(kdl::KdlEntry::new(KdlValue::Float(rounded)));
-            children.nodes_mut().push(sens_node);
-        }
-    }
-
-    doc.nodes_mut().push(node);
-}
-
 fn write_string_node(doc: &mut KdlDocument, name: &str, value: &str) {
     let mut node = KdlNode::new(name);
     let mut entry = kdl::KdlEntry::new(KdlValue::String(value.to_string()));
-    // Force quoted output — KDL v6 outputs bare identifiers for simple strings,
+    // Force quoted output -- KDL v6 outputs bare identifiers for simple strings,
     // but niri's knuffel parser requires quoted strings.
     let mut fmt = kdl::KdlEntryFormat::default();
     fmt.leading = " ".into();
@@ -652,7 +686,10 @@ fn write_config_file(path: &PathBuf, doc: &mut KdlDocument) {
         let _ = fs::create_dir_all(parent);
     }
     doc.autoformat();
-    fs::write(path, doc.to_string()).expect("failed to write config");
+    // Convert KDL v2 booleans (#true/#false) back to v1 (true/false)
+    // so niri's knuffel parser can read them.
+    let output = kdl_v2_to_v1(&doc.to_string());
+    fs::write(path, output).expect("failed to write config");
 }
 
 // ---------------------------------------------------------------------------

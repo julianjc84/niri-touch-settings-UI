@@ -11,7 +11,6 @@ pub fn build() -> gtk::Box {
     let stack = gtk::Stack::new();
     stack.add_titled(&build_general(&settings), Some("general"), "General");
     stack.add_titled(&build_gestures(&settings), Some("gestures"), "Gestures");
-    stack.add_titled(&build_advanced(&settings), Some("advanced"), "Advanced");
 
     let switcher = gtk::StackSwitcher::new();
     switcher.set_stack(Some(&stack));
@@ -327,6 +326,17 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
 
     page.add(&click_group);
 
+    // Gesture recognition threshold (moved from Advanced tab)
+    let settings_clone = settings.clone();
+    page.add(&widgets::build_threshold_row(
+        settings.borrow().recognition_threshold,
+        move |val| {
+            settings_clone.borrow_mut().recognition_threshold = val;
+            config::write_touchpad_settings(&settings_clone.borrow());
+            config::reload_config();
+        },
+    ));
+
     page
 }
 
@@ -387,18 +397,3 @@ fn build_gestures(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesP
     page
 }
 
-fn build_advanced(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder().build();
-
-    let settings_clone = settings.clone();
-    page.add(&widgets::build_threshold_row(
-        settings.borrow().recognition_threshold,
-        move |val| {
-            settings_clone.borrow_mut().recognition_threshold = val;
-            config::write_touchpad_settings(&settings_clone.borrow());
-            config::reload_config();
-        },
-    ));
-
-    page
-}
