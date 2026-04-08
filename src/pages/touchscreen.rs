@@ -77,6 +77,107 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
         },
     ));
 
+    // Pinch detection settings
+    {
+        let pinch_group = adw::PreferencesGroup::builder()
+            .title("Pinch Detection")
+            .description("Controls how pinch-in/out gestures are recognized vs swipes")
+            .build();
+
+        // Pinch threshold (min spread change)
+        let pinch_threshold_row = adw::SpinRow::builder()
+            .title("Pinch Threshold")
+            .subtitle("Minimum finger spread change in pixels to detect a pinch")
+            .adjustment(&gtk::Adjustment::new(
+                settings.borrow().pinch_threshold,
+                5.0,
+                100.0,
+                1.0,
+                5.0,
+                0.0,
+            ))
+            .build();
+        {
+            let settings = settings.clone();
+            pinch_threshold_row.connect_value_notify(move |row| {
+                settings.borrow_mut().pinch_threshold = row.value();
+                save_and_reload(&settings.borrow());
+            });
+        }
+        pinch_group.add(&pinch_threshold_row);
+
+        // Pinch ratio
+        let pinch_ratio_row = adw::SpinRow::builder()
+            .title("Pinch Ratio")
+            .subtitle("Spread change must exceed swipe distance by this factor")
+            .adjustment(&gtk::Adjustment::new(
+                settings.borrow().pinch_ratio,
+                1.0,
+                5.0,
+                0.1,
+                0.5,
+                0.0,
+            ))
+            .digits(1)
+            .build();
+        {
+            let settings = settings.clone();
+            pinch_ratio_row.connect_value_notify(move |row| {
+                settings.borrow_mut().pinch_ratio = row.value();
+                save_and_reload(&settings.borrow());
+            });
+        }
+        pinch_group.add(&pinch_ratio_row);
+
+        // Pinch sensitivity
+        let pinch_sensitivity_row = adw::SpinRow::builder()
+            .title("Pinch Sensitivity")
+            .subtitle("How fast the overview animation tracks your pinch")
+            .adjustment(&gtk::Adjustment::new(
+                settings.borrow().pinch_sensitivity,
+                0.001,
+                0.1,
+                0.001,
+                0.01,
+                0.0,
+            ))
+            .digits(3)
+            .build();
+        {
+            let settings = settings.clone();
+            pinch_sensitivity_row.connect_value_notify(move |row| {
+                settings.borrow_mut().pinch_sensitivity = row.value();
+                save_and_reload(&settings.borrow());
+            });
+        }
+        pinch_group.add(&pinch_sensitivity_row);
+
+        // Finger threshold scale
+        let finger_scale_row = adw::SpinRow::builder()
+            .title("Finger Threshold Scale")
+            .subtitle("Multiplier per extra finger above 3 (e.g. 1.5 = 5 fingers need 2× threshold)")
+            .adjustment(&gtk::Adjustment::new(
+                settings.borrow().finger_threshold_scale,
+                1.0,
+                3.0,
+                0.1,
+                0.5,
+                0.0,
+            ))
+            .digits(1)
+            .build();
+        {
+            let settings = settings.clone();
+            finger_scale_row.connect_value_notify(move |row| {
+                settings.borrow_mut().finger_threshold_scale = row.value();
+                save_and_reload(&settings.borrow());
+            });
+        }
+        pinch_group.add(&finger_scale_row);
+
+        page.add(&pinch_group);
+    }
+
     page
 }
 

@@ -59,6 +59,10 @@ pub struct TouchscreenSettings {
     pub overview_toggle: GestureAction,
     pub recognition_threshold: f64,
     pub edge_threshold: f64,
+    pub pinch_threshold: f64,
+    pub pinch_ratio: f64,
+    pub pinch_sensitivity: f64,
+    pub finger_threshold_scale: f64,
     pub edge_swipe_left: EdgeSwipeSettings,
     pub edge_swipe_right: EdgeSwipeSettings,
     pub edge_swipe_top: EdgeSwipeSettings,
@@ -91,6 +95,10 @@ impl Default for TouchscreenSettings {
             },
             recognition_threshold: 16.0,
             edge_threshold: 20.0,
+            pinch_threshold: 100.0,
+            pinch_ratio: 2.0,
+            pinch_sensitivity: 0.005,
+            finger_threshold_scale: 1.5,
             edge_swipe_left: EdgeSwipeSettings::default(),
             edge_swipe_right: EdgeSwipeSettings::default(),
             edge_swipe_top: EdgeSwipeSettings::default(),
@@ -277,6 +285,18 @@ fn parse_touchscreen_settings(content: &str) -> TouchscreenSettings {
 
     if let Some(v) = read_float_arg(gestures_children, "edge-threshold") {
         settings.edge_threshold = v;
+    }
+    if let Some(v) = read_float_arg(gestures_children, "pinch-threshold") {
+        settings.pinch_threshold = v;
+    }
+    if let Some(v) = read_float_arg(gestures_children, "pinch-ratio") {
+        settings.pinch_ratio = v;
+    }
+    if let Some(v) = read_float_arg(gestures_children, "pinch-sensitivity") {
+        settings.pinch_sensitivity = v;
+    }
+    if let Some(v) = read_float_arg(gestures_children, "finger-threshold-scale") {
+        settings.finger_threshold_scale = v;
     }
     read_edge_swipe(gestures_children, "edge-swipe-left", &mut settings.edge_swipe_left);
     read_edge_swipe(gestures_children, "edge-swipe-right", &mut settings.edge_swipe_right);
@@ -477,6 +497,10 @@ pub fn write_touchscreen_settings(settings: &TouchscreenSettings) {
     write_threshold(gestures_children, settings.recognition_threshold);
 
     write_float_node(gestures_children, "edge-threshold", settings.edge_threshold);
+    write_float_node(gestures_children, "pinch-threshold", settings.pinch_threshold);
+    write_float_node(gestures_children, "pinch-ratio", settings.pinch_ratio);
+    write_float_node(gestures_children, "pinch-sensitivity", settings.pinch_sensitivity);
+    write_float_node(gestures_children, "finger-threshold-scale", settings.finger_threshold_scale);
     write_edge_swipe(gestures_children, "edge-swipe-left", &settings.edge_swipe_left);
     write_edge_swipe(gestures_children, "edge-swipe-right", &settings.edge_swipe_right);
     write_edge_swipe(gestures_children, "edge-swipe-top", &settings.edge_swipe_top);
