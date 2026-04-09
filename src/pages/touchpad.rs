@@ -350,6 +350,34 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
     thresh_group.add(&threshold_row);
     page.add(&thresh_group);
 
+    // IPC progress scaling
+    let ipc_group = adw::PreferencesGroup::builder()
+        .title("IPC Progress")
+        .description("Controls progress scaling for external tools (libinput delta units).\n\
+             Noop gestures: progress directly drives the external app (1:1 sync).\n\
+             Compositor actions (workspace switch, etc): progress is informational only — \
+             niri uses its own internal thresholds to decide when to commit.")
+        .build();
+
+    let progress_row = adw::SpinRow::builder()
+        .title("Gesture Progress Distance")
+        .subtitle("Libinput delta units of movement for IPC progress to reach 1.0")
+        .adjustment(&gtk::Adjustment::new(
+            settings.borrow().gesture_progress_distance,
+            10.0, 500.0, 5.0, 20.0, 0.0,
+        ))
+        .digits(0)
+        .build();
+    {
+        let settings = settings.clone();
+        progress_row.connect_value_notify(move |row| {
+            settings.borrow_mut().gesture_progress_distance = row.value();
+            save_and_reload(&settings);
+        });
+    }
+    ipc_group.add(&progress_row);
+    page.add(&ipc_group);
+
     page
 }
 

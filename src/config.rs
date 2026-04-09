@@ -66,6 +66,8 @@ pub struct TouchscreenSettings {
     pub pinch_ratio: f64,
     pub pinch_sensitivity: f64,
     pub finger_threshold_scale: f64,
+    // IPC progress scaling
+    pub gesture_progress_distance: f64,
     // Dynamic touch binds
     pub binds: Vec<TouchBindEntry>,
 }
@@ -82,6 +84,7 @@ impl Default for TouchscreenSettings {
             pinch_ratio: 2.0,
             pinch_sensitivity: 1.0,
             finger_threshold_scale: 2.6,
+            gesture_progress_distance: 200.0,
             binds: Vec::new(),
         }
     }
@@ -114,6 +117,8 @@ pub struct TouchpadSettings {
     pub scroll_factor: Option<f64>,
     // Gesture settings
     pub recognition_threshold: f64,
+    // IPC progress scaling
+    pub gesture_progress_distance: f64,
     // Dynamic gesture binds (in binds {} block)
     pub binds: Vec<TouchBindEntry>,
 }
@@ -140,6 +145,7 @@ impl Default for TouchpadSettings {
             middle_emulation: false,
             scroll_factor: None,
             recognition_threshold: 16.0,
+            gesture_progress_distance: 40.0,
             binds: Vec::new(),
         }
     }
@@ -260,6 +266,9 @@ fn parse_touchscreen_settings(content: &str) -> TouchscreenSettings {
     if let Some(v) = read_float_arg(gestures_children, "finger-threshold-scale") {
         settings.finger_threshold_scale = v;
     }
+    if let Some(v) = read_float_arg(gestures_children, "gesture-progress-distance") {
+        settings.gesture_progress_distance = v;
+    }
 
     // Gesture binds — now in a top-level `binds {}` block (same file or main config)
     if let Some(binds_node) = doc.get("binds") {
@@ -375,6 +384,7 @@ pub fn write_touchscreen_settings(settings: &TouchscreenSettings) {
     write_float_node(gestures_children, "pinch-ratio", settings.pinch_ratio);
     write_float_node(gestures_children, "pinch-sensitivity", settings.pinch_sensitivity);
     write_float_node(gestures_children, "finger-threshold-scale", settings.finger_threshold_scale);
+    write_float_node(gestures_children, "gesture-progress-distance", settings.gesture_progress_distance);
 
     ts_children.nodes_mut().push(gestures_node);
     input_children.nodes_mut().push(ts_node);
@@ -491,6 +501,9 @@ fn parse_touchpad_settings(content: &str) -> TouchpadSettings {
     if let Some(gestures_node) = tp_children.get("gestures") {
         if let Some(gestures_children) = gestures_node.children() {
             read_threshold(gestures_children, &mut settings.recognition_threshold);
+            if let Some(v) = read_float_arg(gestures_children, "gesture-progress-distance") {
+                settings.gesture_progress_distance = v;
+            }
         }
     }
 
@@ -558,10 +571,11 @@ pub fn write_touchpad_settings(settings: &TouchpadSettings) {
         write_float_node(tp_children, "scroll-factor", factor);
     }
 
-    // Gesture recognition threshold
+    // Gesture settings
     let mut gestures_node = KdlNode::new("gestures");
     let gestures_children = gestures_node.ensure_children();
     write_threshold(gestures_children, settings.recognition_threshold);
+    write_float_node(gestures_children, "gesture-progress-distance", settings.gesture_progress_distance);
 
     tp_children.nodes_mut().push(gestures_node);
     input_children.nodes_mut().push(tp_node);

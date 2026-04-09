@@ -269,6 +269,22 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
 
     page.add(&pinch_group);
 
+    // IPC progress scaling
+    let ipc_group = adw::PreferencesGroup::builder()
+        .title("IPC Progress")
+        .description("Controls progress scaling for external tools (screen pixels).\n\
+             Noop gestures: progress directly drives the external app (1:1 sync).\n\
+             Compositor actions (workspace switch, etc): progress is informational only — \
+             niri uses its own internal thresholds to decide when to commit.")
+        .build();
+
+    add_threshold_row(&ipc_group, settings, "Gesture Progress Distance",
+        "Screen pixels of movement for IPC progress to reach 1.0",
+        settings.borrow().gesture_progress_distance, 50.0, 1000.0, 0,
+        |s, v| s.gesture_progress_distance = v);
+
+    page.add(&ipc_group);
+
     page
 }
 
