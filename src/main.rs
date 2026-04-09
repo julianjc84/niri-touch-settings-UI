@@ -41,8 +41,31 @@ fn build_ui(app: &adw::Application) {
     let header = adw::HeaderBar::new();
     header.set_title_widget(Some(&switcher));
 
+    // Dev/preview info banner showing file layout
+    let info_bar = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    info_bar.set_margin_start(12);
+    info_bar.set_margin_end(12);
+    info_bar.set_margin_top(8);
+    info_bar.set_margin_bottom(4);
+
+    let info_label = gtk::Label::new(Some(
+        "Development GUI — writes to KDL include files:\n\
+         \n\
+         Detection / Device → touchscreen-gestures.kdl / touchpad-gestures.kdl\n\
+         \u{2003}Replaces input { touchscreen {} } or input { touchpad {} }\n\
+         \n\
+         Gesture Binds → same include files, binds {} block\n\
+         \u{2003}Merges Touch*/Touchpad* binds into config.kdl binds {}"
+    ));
+    info_label.set_wrap(true);
+    info_label.set_xalign(0.0);
+    info_label.add_css_class("dim-label");
+    info_label.add_css_class("caption");
+    info_bar.append(&info_label);
+
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content.append(&header);
+    content.append(&info_bar);
     content.append(&view_stack);
 
     let window = adw::ApplicationWindow::builder()

@@ -2,15 +2,14 @@ use adw::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::config::{self, TouchpadSettings};
-use super::widgets;
+use crate::config::{self, TouchBindEntry, TouchpadSettings};
 
 pub fn build() -> gtk::Box {
     let settings = Rc::new(RefCell::new(config::read_touchpad_settings()));
 
     let stack = gtk::Stack::new();
-    stack.add_titled(&build_general(&settings), Some("general"), "General");
-    stack.add_titled(&build_gestures(&settings), Some("gestures"), "Gestures");
+    stack.add_titled(&build_general(&settings), Some("general"), "Device");
+    stack.add_titled(&build_gestures(&settings), Some("gestures"), "Gesture Binds");
 
     let switcher = gtk::StackSwitcher::new();
     switcher.set_stack(Some(&stack));
@@ -35,7 +34,7 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
     // --- Basic settings ---
     let basic_group = adw::PreferencesGroup::builder()
         .title("Device")
-        .description("Basic touchpad settings applied via libinput")
+        .description("Writes to touchpad-gestures.kdl → replaces input { touchpad {} }")
         .build();
 
     // Off
@@ -326,74 +325,399 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
 
     page.add(&click_group);
 
-    // Gesture recognition threshold (moved from Advanced tab)
-    let settings_clone = settings.clone();
-    page.add(&widgets::build_threshold_row(
-        settings.borrow().recognition_threshold,
-        move |val| {
-            settings_clone.borrow_mut().recognition_threshold = val;
-            config::write_touchpad_settings(&settings_clone.borrow());
-            config::reload_config();
-        },
-    ));
+    // Gesture recognition threshold
+    let thresh_group = adw::PreferencesGroup::builder()
+        .title("Gesture Recognition")
+        .description("Fine-tune how gestures are detected")
+        .build();
+
+    let threshold_row = adw::SpinRow::builder()
+        .title("Recognition Threshold")
+        .subtitle("Distance in pixels before gesture direction locks")
+        .adjustment(&gtk::Adjustment::new(
+            settings.borrow().recognition_threshold,
+            4.0, 100.0, 1.0, 5.0, 0.0,
+        ))
+        .digits(1)
+        .build();
+    {
+        let settings = settings.clone();
+        threshold_row.connect_value_notify(move |row| {
+            settings.borrow_mut().recognition_threshold = row.value();
+            save_and_reload(&settings);
+        });
+    }
+    thresh_group.add(&threshold_row);
+    page.add(&thresh_group);
 
     page
 }
 
+// ---------------------------------------------------------------------------
+// Touchpad gesture presets
+// ---------------------------------------------------------------------------
+
+const TOUCHPAD_GESTURE_OPTIONS: &[(&str, &str)] = &[
+    ("3-Finger Swipe Up", "TouchpadSwipe3Up"),
+    ("3-Finger Swipe Down", "TouchpadSwipe3Down"),
+    ("3-Finger Swipe Left", "TouchpadSwipe3Left"),
+    ("3-Finger Swipe Right", "TouchpadSwipe3Right"),
+    ("4-Finger Swipe Up", "TouchpadSwipe4Up"),
+    ("4-Finger Swipe Down", "TouchpadSwipe4Down"),
+    ("4-Finger Swipe Left", "TouchpadSwipe4Left"),
+    ("4-Finger Swipe Right", "TouchpadSwipe4Right"),
+    ("5-Finger Swipe Up", "TouchpadSwipe5Up"),
+    ("5-Finger Swipe Down", "TouchpadSwipe5Down"),
+    ("5-Finger Swipe Left", "TouchpadSwipe5Left"),
+    ("5-Finger Swipe Right", "TouchpadSwipe5Right"),
+];
+
+const TOUCHPAD_ACTION_OPTIONS: &[(&str, &str)] = &[
+    ("Focus Workspace Up", "focus-workspace-up"),
+    ("Focus Workspace Down", "focus-workspace-down"),
+    ("Focus Column Left", "focus-column-left"),
+    ("Focus Column Right", "focus-column-right"),
+    ("Toggle Overview", "toggle-overview"),
+    ("Open Overview", "open-overview"),
+    ("Close Overview", "close-overview"),
+    ("Close Window", "close-window"),
+    ("Fullscreen Window", "fullscreen-window"),
+    ("Maximize Column", "maximize-column"),
+    ("Center Column", "center-column"),
+    ("Toggle Floating", "toggle-window-floating"),
+    ("Screenshot", "screenshot"),
+    ("Move Window to Workspace Down", "move-window-to-workspace-down"),
+    ("Move Window to Workspace Up", "move-window-to-workspace-up"),
+    ("Focus Monitor Left", "focus-monitor-left"),
+    ("Focus Monitor Right", "focus-monitor-right"),
+    ("Show Hotkey Overlay", "show-hotkey-overlay"),
+    ("Spawn Command...", "spawn"),
+    ("Noop (IPC only)", "noop"),
+];
+
+fn display_gesture_name(kdl_name: &str) -> String {
+    if let Some((display, _)) = TOUCHPAD_GESTURE_OPTIONS.iter().find(|(_, k)| *k == kdl_name) {
+        return display.to_string();
+    }
+    kdl_name.to_string()
+}
+
+fn display_action_name(action_name: &str, action_args: &[String]) -> String {
+    if action_name == "spawn" && !action_args.is_empty() {
+        return format!("Spawn: {}", action_args.join(" "));
+    }
+    if let Some((display, _)) = TOUCHPAD_ACTION_OPTIONS.iter().find(|(_, k)| *k == action_name) {
+        return display.to_string();
+    }
+    action_name
+        .split('-')
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+// ---------------------------------------------------------------------------
+// Gesture Binds tab
+// ---------------------------------------------------------------------------
+
 fn build_gestures(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder().build();
 
-    let ws_action = Rc::new(RefCell::new(settings.borrow().workspace_switch.clone()));
-    let vs_action = Rc::new(RefCell::new(settings.borrow().view_scroll.clone()));
-    let ov_action = Rc::new(RefCell::new(settings.borrow().overview_toggle.clone()));
-
-    let save = {
-        let settings = settings.clone();
-        let ws = ws_action.clone();
-        let vs = vs_action.clone();
-        let ov = ov_action.clone();
-        Rc::new(move || {
-            let mut s = settings.borrow_mut();
-            s.workspace_switch = ws.borrow().clone();
-            s.view_scroll = vs.borrow().clone();
-            s.overview_toggle = ov.borrow().clone();
-            config::write_touchpad_settings(&s);
-            config::reload_config();
-        })
-    };
-
     let info = adw::PreferencesGroup::builder()
-        .description("Gestures require 3+ fingers. 2-finger events (scroll, pinch-to-zoom) are handled by libinput and passed directly to apps.")
+        .description(
+            "Writes to touchpad-gestures.kdl → merges into binds {}\n\
+             3+ finger gestures only. 2-finger scroll/pinch is handled by libinput."
+        )
         .build();
     page.add(&info);
 
-    page.add(&widgets::build_gesture_group(
-        "View Scroll",
-        "Horizontal swipe to scroll between columns",
-        &settings.borrow().view_scroll,
-        save.clone(),
-        vs_action,
-        false,
-    ));
+    // Active binds group
+    let binds_group = Rc::new(adw::PreferencesGroup::builder()
+        .title("Active Binds")
+        .build());
 
-    page.add(&widgets::build_gesture_group(
-        "Workspace Switch",
-        "Vertical swipe to switch workspaces",
-        &settings.borrow().workspace_switch,
-        save.clone(),
-        ws_action,
-        false,
-    ));
+    // Add new bind form (at top for easy access)
+    let add_group = build_add_form(settings, &binds_group);
+    page.add(&add_group);
 
-    page.add(&widgets::build_gesture_group(
-        "Overview Toggle",
-        "Vertical swipe to open/close overview",
-        &settings.borrow().overview_toggle,
-        save.clone(),
-        ov_action,
-        false,
-    ));
+    let binds = settings.borrow().binds.clone();
+    for bind in &binds {
+        let row = build_bind_row(bind, &binds_group, settings);
+        binds_group.add(&row);
+    }
+    page.add(&*binds_group);
 
     page
+}
+
+fn build_bind_row(
+    bind: &TouchBindEntry,
+    group: &Rc<adw::PreferencesGroup>,
+    settings: &Rc<RefCell<TouchpadSettings>>,
+) -> adw::ExpanderRow {
+    let gesture_display = display_gesture_name(&bind.gesture_name);
+    let action_display = display_action_name(&bind.action_name, &bind.action_args);
+
+    let row = adw::ExpanderRow::builder()
+        .title(&gesture_display)
+        .subtitle(&action_display)
+        .build();
+
+    // Enable/disable toggle in suffix (iOS/Android style)
+    let enable_switch = gtk::Switch::builder()
+        .valign(gtk::Align::Center)
+        .active(bind.enabled)
+        .build();
+
+    {
+        let gesture_name = bind.gesture_name.clone();
+        let settings = settings.clone();
+        enable_switch.connect_active_notify(move |switch| {
+            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+                .find(|b| b.gesture_name == gesture_name)
+            {
+                b.enabled = switch.is_active();
+            }
+            save_and_reload(&settings);
+        });
+    }
+    row.add_suffix(&enable_switch);
+
+    // Delete button with confirmation
+    let delete_btn = gtk::Button::builder()
+        .icon_name("user-trash-symbolic")
+        .valign(gtk::Align::Center)
+        .css_classes(vec!["flat".to_string(), "circular".to_string()])
+        .build();
+
+    {
+        let gesture_name = bind.gesture_name.clone();
+        let gesture_display = gesture_display.clone();
+        let row_clone = row.clone();
+        let group = group.clone();
+        let settings = settings.clone();
+        delete_btn.connect_clicked(move |btn| {
+            let window = btn.root().and_downcast::<gtk::Window>();
+            let dialog = adw::MessageDialog::new(
+                window.as_ref(),
+                Some("Delete Bind?"),
+                Some(&format!("Remove {} gesture bind?", gesture_display)),
+            );
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("delete", "Delete");
+            dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+            dialog.set_default_response(Some("cancel"));
+
+            let gesture_name = gesture_name.clone();
+            let row_clone = row_clone.clone();
+            let group = group.clone();
+            let settings = settings.clone();
+            dialog.connect_response(None, move |_, response| {
+                if response == "delete" {
+                    settings.borrow_mut().binds.retain(|b| b.gesture_name != gesture_name);
+                    save_and_reload(&settings);
+                    group.remove(&row_clone);
+                }
+            });
+
+            dialog.present();
+        });
+    }
+    row.add_suffix(&delete_btn);
+
+    // Action dropdown
+    let action_labels: Vec<&str> = TOUCHPAD_ACTION_OPTIONS.iter().map(|(d, _)| *d).collect();
+    let action_model = gtk::StringList::new(&action_labels);
+    let action_combo = adw::ComboRow::builder()
+        .title("Action")
+        .model(&action_model)
+        .build();
+
+    let current_idx = TOUCHPAD_ACTION_OPTIONS.iter()
+        .position(|(_, k)| *k == bind.action_name)
+        .unwrap_or(0) as u32;
+    action_combo.set_selected(current_idx);
+
+    {
+        let gesture_name = bind.gesture_name.clone();
+        let settings = settings.clone();
+        let row_ref = row.clone();
+        action_combo.connect_selected_notify(move |combo| {
+            let idx = combo.selected() as usize;
+            if idx >= TOUCHPAD_ACTION_OPTIONS.len() { return; }
+            let new_action = TOUCHPAD_ACTION_OPTIONS[idx].1.to_string();
+            let new_display = TOUCHPAD_ACTION_OPTIONS[idx].0;
+
+            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+                .find(|b| b.gesture_name == gesture_name)
+            {
+                b.action_name = new_action;
+                b.action_args.clear();
+            }
+            row_ref.set_subtitle(new_display);
+            save_and_reload(&settings);
+        });
+    }
+    row.add_row(&action_combo);
+
+    // Sensitivity
+    let sens_row = adw::SpinRow::builder()
+        .title("Sensitivity")
+        .subtitle("Speed multiplier (continuous actions)")
+        .adjustment(&gtk::Adjustment::new(
+            bind.sensitivity.unwrap_or(1.0),
+            0.1, 5.0, 0.1, 0.5, 0.0,
+        ))
+        .digits(1)
+        .build();
+
+    {
+        let gesture_name = bind.gesture_name.clone();
+        let settings = settings.clone();
+        sens_row.connect_value_notify(move |spin| {
+            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+                .find(|b| b.gesture_name == gesture_name)
+            {
+                b.sensitivity = Some(spin.value());
+            }
+            save_and_reload(&settings);
+        });
+    }
+    row.add_row(&sens_row);
+
+    // Tag — IPC event identifier
+    let tag_row = adw::EntryRow::builder()
+        .title("Tag")
+        .text(bind.tag.as_deref().unwrap_or(""))
+        .build();
+
+    {
+        let gesture_name = bind.gesture_name.clone();
+        let settings = settings.clone();
+        tag_row.connect_changed(move |entry| {
+            let text = entry.text().to_string();
+            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+                .find(|b| b.gesture_name == gesture_name)
+            {
+                b.tag = if text.is_empty() { None } else { Some(text) };
+            }
+            save_and_reload(&settings);
+        });
+    }
+    row.add_row(&tag_row);
+
+    row
+}
+
+fn build_add_form(
+    settings: &Rc<RefCell<TouchpadSettings>>,
+    binds_group: &Rc<adw::PreferencesGroup>,
+) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder()
+        .title("Add New Bind")
+        .build();
+
+    // Gesture dropdown
+    let gesture_labels: Vec<&str> = TOUCHPAD_GESTURE_OPTIONS.iter().map(|(d, _)| *d).collect();
+    let gesture_model = gtk::StringList::new(&gesture_labels);
+    let gesture_combo = adw::ComboRow::builder()
+        .title("Gesture")
+        .model(&gesture_model)
+        .selected(0)
+        .build();
+    group.add(&gesture_combo);
+
+    // Action dropdown
+    let action_labels: Vec<&str> = TOUCHPAD_ACTION_OPTIONS.iter().map(|(d, _)| *d).collect();
+    let action_model = gtk::StringList::new(&action_labels);
+    let action_combo = adw::ComboRow::builder()
+        .title("Action")
+        .model(&action_model)
+        .selected(0)
+        .build();
+    group.add(&action_combo);
+
+    // Spawn command entry
+    let spawn_entry = adw::EntryRow::builder()
+        .title("Command")
+        .visible(false)
+        .build();
+    group.add(&spawn_entry);
+
+    {
+        let spawn_entry = spawn_entry.clone();
+        action_combo.connect_selected_notify(move |row| {
+            let idx = row.selected() as usize;
+            if idx < TOUCHPAD_ACTION_OPTIONS.len() {
+                spawn_entry.set_visible(TOUCHPAD_ACTION_OPTIONS[idx].1 == "spawn");
+            }
+        });
+    }
+
+    // Add button
+    let add_row = adw::ActionRow::builder()
+        .title("Add Bind")
+        .activatable(true)
+        .build();
+    add_row.add_prefix(&gtk::Image::from_icon_name("list-add-symbolic"));
+
+    {
+        let settings = settings.clone();
+        let binds_group = binds_group.clone();
+        let gesture_combo = gesture_combo.clone();
+        let action_combo = action_combo.clone();
+        let spawn_entry = spawn_entry.clone();
+
+        add_row.connect_activated(move |_| {
+            let gesture_idx = gesture_combo.selected() as usize;
+            let action_idx = action_combo.selected() as usize;
+
+            if gesture_idx >= TOUCHPAD_GESTURE_OPTIONS.len()
+                || action_idx >= TOUCHPAD_ACTION_OPTIONS.len()
+            {
+                return;
+            }
+
+            let gesture_name = TOUCHPAD_GESTURE_OPTIONS[gesture_idx].1.to_string();
+            let action_name = TOUCHPAD_ACTION_OPTIONS[action_idx].1.to_string();
+
+            if settings.borrow().binds.iter().any(|b| b.gesture_name == gesture_name) {
+                return;
+            }
+
+            let action_args = if action_name == "spawn" {
+                let cmd = spawn_entry.text().to_string();
+                if cmd.is_empty() { return; }
+                vec![cmd]
+            } else {
+                vec![]
+            };
+
+            let bind = TouchBindEntry {
+                gesture_name,
+                action_name,
+                action_args,
+                sensitivity: None,
+                natural_scroll: false,
+                tag: None,
+                enabled: true,
+            };
+
+            settings.borrow_mut().binds.push(bind.clone());
+            save_and_reload(&settings);
+
+            let row = build_bind_row(&bind, &binds_group, &settings);
+            binds_group.add(&row);
+        });
+    }
+    group.add(&add_row);
+
+    group
 }
 

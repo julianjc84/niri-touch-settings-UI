@@ -84,23 +84,13 @@ const ACTION_OPTIONS: &[(&str, &str)] = &[
     ("Show Hotkey Overlay", "show-hotkey-overlay"),
     // Launch
     ("Spawn Command...", "spawn"),
+    // IPC-only
+    ("Noop (IPC only)", "noop"),
 ];
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Returns true if the action drives a continuous animation (tracks finger).
-fn is_continuous_action(action: &str) -> bool {
-    matches!(
-        action,
-        "focus-workspace-up"
-            | "focus-workspace-down"
-            | "focus-column-left"
-            | "focus-column-right"
-            | "toggle-overview"
-    )
-}
 
 /// Convert a KDL gesture name to a human-readable display name.
 fn display_gesture_name(kdl_name: &str) -> String {
@@ -174,8 +164,8 @@ pub fn build() -> gtk::Box {
     let settings = Rc::new(RefCell::new(config::read_touchscreen_settings()));
 
     let stack = gtk::Stack::new();
-    stack.add_titled(&build_general(&settings), Some("general"), "General");
-    stack.add_titled(&build_binds_page(&settings), Some("binds"), "Touch Binds");
+    stack.add_titled(&build_general(&settings), Some("general"), "Detection");
+    stack.add_titled(&build_binds_page(&settings), Some("binds"), "Gesture Binds");
 
     let switcher = gtk::StackSwitcher::new();
     switcher.set_stack(Some(&stack));
@@ -194,12 +184,14 @@ pub fn build() -> gtk::Box {
 // ---------------------------------------------------------------------------
 
 fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder().build();
+    let page = adw::PreferencesPage::builder()
+        .description("input { touchscreen { gestures {} } }")
+        .build();
 
     // Device group
     let group = adw::PreferencesGroup::builder()
         .title("Touchscreen Input")
-        .description("General touchscreen settings")
+        .description("Writes to touchscreen-gestures.kdl → replaces input { touchscreen {} }")
         .build();
 
     let enable_row = adw::SwitchRow::builder()
@@ -318,7 +310,7 @@ fn build_binds_page(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Prefere
     // Info
     let info = adw::PreferencesGroup::builder()
         .description(
-            "Map touchscreen gestures to niri actions. \
+            "Writes to touchscreen-gestures.kdl → merges into binds {}\n\
              Continuous actions (workspace switch, column scroll, overview) \
              track your finger. All others fire once."
         )
@@ -330,12 +322,12 @@ fn build_binds_page(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Prefere
         .title("Active Binds")
         .build());
 
-    populate_binds_group(&binds_group, settings);
-    page.add(&*binds_group);
-
-    // Add new bind form
+    // Add new bind form (at top for easy access)
     let add_group = build_add_form(settings, &binds_group);
     page.add(&add_group);
+
+    populate_binds_group(&binds_group, settings);
+    page.add(&*binds_group);
 
     page
 }
@@ -368,7 +360,27 @@ fn build_bind_row(
         .subtitle(&action_display)
         .build();
 
-    // Delete button
+    // Enable/disable toggle in suffix (iOS/Android style)
+    let enable_switch = gtk::Switch::builder()
+        .valign(gtk::Align::Center)
+        .active(bind.enabled)
+        .build();
+
+    {
+        let gesture_name = bind.gesture_name.clone();
+        let settings = settings.clone();
+        enable_switch.connect_active_notify(move |switch| {
+            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+                .find(|b| b.gesture_name == gesture_name)
+            {
+                b.enabled = switch.is_active();
+            }
+            save_and_reload(&settings.borrow());
+        });
+    }
+    row.add_suffix(&enable_switch);
+
+    // Delete button with confirmation
     let delete_btn = gtk::Button::builder()
         .icon_name("user-trash-symbolic")
         .valign(gtk::Align::Center)
@@ -377,63 +389,141 @@ fn build_bind_row(
 
     {
         let gesture_name = bind.gesture_name.clone();
+        let gesture_display = gesture_display.clone();
         let row_clone = row.clone();
         let group = group.clone();
         let settings = settings.clone();
-        delete_btn.connect_clicked(move |_| {
-            settings.borrow_mut().binds.retain(|b| b.gesture_name != gesture_name);
-            save_and_reload(&settings.borrow());
-            group.remove(&row_clone);
+        delete_btn.connect_clicked(move |btn| {
+            let window = btn.root().and_downcast::<gtk::Window>();
+            let dialog = adw::MessageDialog::new(
+                window.as_ref(),
+                Some("Delete Bind?"),
+                Some(&format!("Remove {} gesture bind?", gesture_display)),
+            );
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("delete", "Delete");
+            dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+            dialog.set_default_response(Some("cancel"));
+
+            let gesture_name = gesture_name.clone();
+            let row_clone = row_clone.clone();
+            let group = group.clone();
+            let settings = settings.clone();
+            dialog.connect_response(None, move |_, response| {
+                if response == "delete" {
+                    settings.borrow_mut().binds.retain(|b| b.gesture_name != gesture_name);
+                    save_and_reload(&settings.borrow());
+                    group.remove(&row_clone);
+                }
+            });
+
+            dialog.present();
         });
     }
     row.add_suffix(&delete_btn);
 
-    // Sensitivity and natural-scroll rows (only for continuous actions)
-    if is_continuous_action(&bind.action_name) {
-        let sens_row = adw::SpinRow::builder()
-            .title("Sensitivity")
-            .subtitle("Speed multiplier for this gesture")
-            .adjustment(&gtk::Adjustment::new(
-                bind.sensitivity.unwrap_or(1.0),
-                0.1, 5.0, 0.1, 0.5, 0.0,
-            ))
-            .digits(1)
-            .build();
+    // Action dropdown — lets user change what this gesture does
+    let action_labels: Vec<&str> = ACTION_OPTIONS.iter().map(|(d, _)| *d).collect();
+    let action_model = gtk::StringList::new(&action_labels);
+    let action_combo = adw::ComboRow::builder()
+        .title("Action")
+        .model(&action_model)
+        .build();
 
-        {
-            let gesture_name = bind.gesture_name.clone();
-            let settings = settings.clone();
-            sens_row.connect_value_notify(move |spin| {
-                if let Some(b) = settings.borrow_mut().binds.iter_mut()
-                    .find(|b| b.gesture_name == gesture_name)
-                {
-                    b.sensitivity = Some(spin.value());
-                }
-                save_and_reload(&settings.borrow());
-            });
-        }
-        row.add_row(&sens_row);
+    // Set current selection
+    let current_idx = ACTION_OPTIONS.iter()
+        .position(|(_, k)| *k == bind.action_name)
+        .unwrap_or(0) as u32;
+    action_combo.set_selected(current_idx);
 
-        let natural_row = adw::SwitchRow::builder()
-            .title("Natural Scroll")
-            .subtitle("Invert gesture direction")
-            .active(bind.natural_scroll)
-            .build();
+    {
+        let gesture_name = bind.gesture_name.clone();
+        let settings = settings.clone();
+        let row_ref = row.clone();
+        action_combo.connect_selected_notify(move |combo| {
+            let idx = combo.selected() as usize;
+            if idx >= ACTION_OPTIONS.len() { return; }
+            let new_action = ACTION_OPTIONS[idx].1.to_string();
+            let new_display = ACTION_OPTIONS[idx].0;
 
-        {
-            let gesture_name = bind.gesture_name.clone();
-            let settings = settings.clone();
-            natural_row.connect_active_notify(move |switch| {
-                if let Some(b) = settings.borrow_mut().binds.iter_mut()
-                    .find(|b| b.gesture_name == gesture_name)
-                {
-                    b.natural_scroll = switch.is_active();
-                }
-                save_and_reload(&settings.borrow());
-            });
-        }
-        row.add_row(&natural_row);
+            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+                .find(|b| b.gesture_name == gesture_name)
+            {
+                b.action_name = new_action;
+                b.action_args.clear();
+            }
+            row_ref.set_subtitle(new_display);
+            save_and_reload(&settings.borrow());
+        });
     }
+    row.add_row(&action_combo);
+
+    // Sensitivity
+    let sens_row = adw::SpinRow::builder()
+        .title("Sensitivity")
+        .subtitle("Speed multiplier (continuous actions)")
+        .adjustment(&gtk::Adjustment::new(
+            bind.sensitivity.unwrap_or(1.0),
+            0.1, 5.0, 0.1, 0.5, 0.0,
+        ))
+        .digits(1)
+        .build();
+
+    {
+        let gesture_name = bind.gesture_name.clone();
+        let settings = settings.clone();
+        sens_row.connect_value_notify(move |spin| {
+            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+                .find(|b| b.gesture_name == gesture_name)
+            {
+                b.sensitivity = Some(spin.value());
+            }
+            save_and_reload(&settings.borrow());
+        });
+    }
+    row.add_row(&sens_row);
+
+    // Natural scroll
+    let natural_row = adw::SwitchRow::builder()
+        .title("Natural Scroll")
+        .subtitle("Invert gesture direction")
+        .active(bind.natural_scroll)
+        .build();
+
+    {
+        let gesture_name = bind.gesture_name.clone();
+        let settings = settings.clone();
+        natural_row.connect_active_notify(move |switch| {
+            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+                .find(|b| b.gesture_name == gesture_name)
+            {
+                b.natural_scroll = switch.is_active();
+            }
+            save_and_reload(&settings.borrow());
+        });
+    }
+    row.add_row(&natural_row);
+
+    // Tag — IPC event identifier for external tools
+    let tag_row = adw::EntryRow::builder()
+        .title("Tag")
+        .text(bind.tag.as_deref().unwrap_or(""))
+        .build();
+
+    {
+        let gesture_name = bind.gesture_name.clone();
+        let settings = settings.clone();
+        tag_row.connect_changed(move |entry| {
+            let text = entry.text().to_string();
+            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+                .find(|b| b.gesture_name == gesture_name)
+            {
+                b.tag = if text.is_empty() { None } else { Some(text) };
+            }
+            save_and_reload(&settings.borrow());
+        });
+    }
+    row.add_row(&tag_row);
 
     row
 }
@@ -532,6 +622,8 @@ fn build_add_form(
                 action_args,
                 sensitivity: None,
                 natural_scroll: false,
+                tag: None,
+                enabled: true,
             };
 
             // Add to settings
