@@ -10,29 +10,29 @@ use crate::config::{self, TouchBindEntry, TouchscreenSettings};
 
 const GESTURE_OPTIONS: &[(&str, &str)] = &[
     // 3-finger swipes
-    ("3-Finger Swipe Up", "Touch3SwipeUp"),
-    ("3-Finger Swipe Down", "Touch3SwipeDown"),
-    ("3-Finger Swipe Left", "Touch3SwipeLeft"),
-    ("3-Finger Swipe Right", "Touch3SwipeRight"),
+    ("3-Finger Swipe Up", "TouchSwipe3Up"),
+    ("3-Finger Swipe Down", "TouchSwipe3Down"),
+    ("3-Finger Swipe Left", "TouchSwipe3Left"),
+    ("3-Finger Swipe Right", "TouchSwipe3Right"),
     // 4-finger swipes
-    ("4-Finger Swipe Up", "Touch4SwipeUp"),
-    ("4-Finger Swipe Down", "Touch4SwipeDown"),
-    ("4-Finger Swipe Left", "Touch4SwipeLeft"),
-    ("4-Finger Swipe Right", "Touch4SwipeRight"),
+    ("4-Finger Swipe Up", "TouchSwipe4Up"),
+    ("4-Finger Swipe Down", "TouchSwipe4Down"),
+    ("4-Finger Swipe Left", "TouchSwipe4Left"),
+    ("4-Finger Swipe Right", "TouchSwipe4Right"),
     // 5-finger swipes
-    ("5-Finger Swipe Up", "Touch5SwipeUp"),
-    ("5-Finger Swipe Down", "Touch5SwipeDown"),
-    ("5-Finger Swipe Left", "Touch5SwipeLeft"),
-    ("5-Finger Swipe Right", "Touch5SwipeRight"),
+    ("5-Finger Swipe Up", "TouchSwipe5Up"),
+    ("5-Finger Swipe Down", "TouchSwipe5Down"),
+    ("5-Finger Swipe Left", "TouchSwipe5Left"),
+    ("5-Finger Swipe Right", "TouchSwipe5Right"),
     // 3-finger pinch
-    ("3-Finger Pinch In", "Touch3PinchIn"),
-    ("3-Finger Pinch Out", "Touch3PinchOut"),
+    ("3-Finger Pinch In", "TouchPinch3In"),
+    ("3-Finger Pinch Out", "TouchPinch3Out"),
     // 4-finger pinch
-    ("4-Finger Pinch In", "Touch4PinchIn"),
-    ("4-Finger Pinch Out", "Touch4PinchOut"),
+    ("4-Finger Pinch In", "TouchPinch4In"),
+    ("4-Finger Pinch Out", "TouchPinch4Out"),
     // 5-finger pinch
-    ("5-Finger Pinch In", "Touch5PinchIn"),
-    ("5-Finger Pinch Out", "Touch5PinchOut"),
+    ("5-Finger Pinch In", "TouchPinch5In"),
+    ("5-Finger Pinch Out", "TouchPinch5Out"),
     // Edge swipes
     ("Edge Left", "TouchEdgeLeft"),
     ("Edge Right", "TouchEdgeRight"),

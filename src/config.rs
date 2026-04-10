@@ -34,7 +34,7 @@ include \"touchpad-gestures.kdl\" optional=true\n";
 
 #[derive(Debug, Clone)]
 pub struct TouchBindEntry {
-    /// KDL node name, e.g. "Touch3SwipeUp", "TouchEdgeLeft"
+    /// KDL node name, e.g. "TouchSwipe3Up", "TouchEdgeLeft"
     pub gesture_name: String,
     /// Action KDL name, e.g. "focus-workspace-up", "close-window", "spawn", "noop"
     pub action_name: String,
@@ -282,7 +282,7 @@ fn parse_touchscreen_settings(content: &str) -> TouchscreenSettings {
 
 /// Check if a node name is a gesture trigger (Touch* or Touchpad* or Mod+Touch*).
 fn is_gesture_bind(name: &str) -> bool {
-    // Handle modifier prefixes like "Mod+Touch3SwipeUp"
+    // Handle modifier prefixes like "Mod+TouchSwipe3Up"
     let trigger = if let Some(pos) = name.rfind('+') {
         &name[pos + 1..]
     } else {
