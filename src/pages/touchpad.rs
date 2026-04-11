@@ -332,10 +332,10 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
         .build();
 
     let threshold_row = adw::SpinRow::builder()
-        .title("Recognition Threshold")
-        .subtitle("Distance in pixels before gesture direction locks")
+        .title("Swipe Trigger Distance")
+        .subtitle("Libinput delta units of motion before a swipe commits")
         .adjustment(&gtk::Adjustment::new(
-            settings.borrow().recognition_threshold,
+            settings.borrow().swipe_trigger_distance,
             4.0, 100.0, 1.0, 5.0, 0.0,
         ))
         .digits(1)
@@ -343,7 +343,7 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
     {
         let settings = settings.clone();
         threshold_row.connect_value_notify(move |row| {
-            settings.borrow_mut().recognition_threshold = row.value();
+            settings.borrow_mut().swipe_trigger_distance = row.value();
             save_and_reload(&settings);
         });
     }
@@ -360,10 +360,10 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
         .build();
 
     let progress_row = adw::SpinRow::builder()
-        .title("Gesture Progress Distance")
-        .subtitle("Libinput delta units of movement for IPC progress to reach 1.0")
+        .title("Swipe Progress Distance")
+        .subtitle("Libinput delta units of swipe that map to IPC progress = 1.0")
         .adjustment(&gtk::Adjustment::new(
-            settings.borrow().gesture_progress_distance,
+            settings.borrow().swipe_progress_distance,
             10.0, 500.0, 5.0, 20.0, 0.0,
         ))
         .digits(0)
@@ -371,7 +371,7 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
     {
         let settings = settings.clone();
         progress_row.connect_value_notify(move |row| {
-            settings.borrow_mut().gesture_progress_distance = row.value();
+            settings.borrow_mut().swipe_progress_distance = row.value();
             save_and_reload(&settings);
         });
     }

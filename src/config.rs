@@ -59,15 +59,15 @@ pub struct TouchscreenSettings {
     pub off: bool,
     pub natural_scroll: bool,
     pub map_to_output: Option<String>,
-    // Detection thresholds
-    pub recognition_threshold: f64,
-    pub edge_threshold: f64,
-    pub pinch_threshold: f64,
-    pub pinch_ratio: f64,
+    // Classifier commit gates
+    pub swipe_trigger_distance: f64,
+    pub edge_start_distance: f64,
+    pub pinch_trigger_distance: f64,
+    pub pinch_dominance_ratio: f64,
     pub pinch_sensitivity: f64,
-    pub finger_threshold_scale: f64,
+    pub swipe_multi_finger_scale: f64,
     // IPC progress scaling
-    pub gesture_progress_distance: f64,
+    pub swipe_progress_distance: f64,
     // Dynamic touch binds
     pub binds: Vec<TouchBindEntry>,
 }
@@ -78,13 +78,13 @@ impl Default for TouchscreenSettings {
             off: false,
             natural_scroll: false,
             map_to_output: None,
-            recognition_threshold: 16.0,
-            edge_threshold: 20.0,
-            pinch_threshold: 20.0,
-            pinch_ratio: 2.0,
+            swipe_trigger_distance: 16.0,
+            edge_start_distance: 20.0,
+            pinch_trigger_distance: 20.0,
+            pinch_dominance_ratio: 2.0,
             pinch_sensitivity: 1.0,
-            finger_threshold_scale: 2.6,
-            gesture_progress_distance: 200.0,
+            swipe_multi_finger_scale: 2.6,
+            swipe_progress_distance: 200.0,
             binds: Vec::new(),
         }
     }
@@ -116,9 +116,9 @@ pub struct TouchpadSettings {
     pub middle_emulation: bool,
     pub scroll_factor: Option<f64>,
     // Gesture settings
-    pub recognition_threshold: f64,
+    pub swipe_trigger_distance: f64,
     // IPC progress scaling
-    pub gesture_progress_distance: f64,
+    pub swipe_progress_distance: f64,
     // Dynamic gesture binds (in binds {} block)
     pub binds: Vec<TouchBindEntry>,
 }
@@ -144,8 +144,8 @@ impl Default for TouchpadSettings {
             disabled_on_external_mouse: false,
             middle_emulation: false,
             scroll_factor: None,
-            recognition_threshold: 16.0,
-            gesture_progress_distance: 40.0,
+            swipe_trigger_distance: 16.0,
+            swipe_progress_distance: 40.0,
             binds: Vec::new(),
         }
     }
@@ -247,27 +247,27 @@ fn parse_touchscreen_settings(content: &str) -> TouchscreenSettings {
     let Some(gestures_node) = ts_children.get("gestures") else { return settings };
     let Some(gestures_children) = gestures_node.children() else { return settings };
 
-    // Detection thresholds
-    if let Some(v) = read_float_arg(gestures_children, "recognition-threshold") {
-        settings.recognition_threshold = v;
+    // Classifier commit gates + IPC scaling
+    if let Some(v) = read_float_arg(gestures_children, "swipe-trigger-distance") {
+        settings.swipe_trigger_distance = v;
     }
-    if let Some(v) = read_float_arg(gestures_children, "edge-threshold") {
-        settings.edge_threshold = v;
+    if let Some(v) = read_float_arg(gestures_children, "edge-start-distance") {
+        settings.edge_start_distance = v;
     }
-    if let Some(v) = read_float_arg(gestures_children, "pinch-threshold") {
-        settings.pinch_threshold = v;
+    if let Some(v) = read_float_arg(gestures_children, "pinch-trigger-distance") {
+        settings.pinch_trigger_distance = v;
     }
-    if let Some(v) = read_float_arg(gestures_children, "pinch-ratio") {
-        settings.pinch_ratio = v;
+    if let Some(v) = read_float_arg(gestures_children, "pinch-dominance-ratio") {
+        settings.pinch_dominance_ratio = v;
     }
     if let Some(v) = read_float_arg(gestures_children, "pinch-sensitivity") {
         settings.pinch_sensitivity = v;
     }
-    if let Some(v) = read_float_arg(gestures_children, "finger-threshold-scale") {
-        settings.finger_threshold_scale = v;
+    if let Some(v) = read_float_arg(gestures_children, "swipe-multi-finger-scale") {
+        settings.swipe_multi_finger_scale = v;
     }
-    if let Some(v) = read_float_arg(gestures_children, "gesture-progress-distance") {
-        settings.gesture_progress_distance = v;
+    if let Some(v) = read_float_arg(gestures_children, "swipe-progress-distance") {
+        settings.swipe_progress_distance = v;
     }
 
     // Gesture binds — now in a top-level `binds {}` block (same file or main config)
@@ -377,14 +377,14 @@ pub fn write_touchscreen_settings(settings: &TouchscreenSettings) {
     let mut gestures_node = KdlNode::new("gestures");
     let gestures_children = gestures_node.ensure_children();
 
-    // Detection thresholds
-    write_float_node(gestures_children, "recognition-threshold", settings.recognition_threshold);
-    write_float_node(gestures_children, "edge-threshold", settings.edge_threshold);
-    write_float_node(gestures_children, "pinch-threshold", settings.pinch_threshold);
-    write_float_node(gestures_children, "pinch-ratio", settings.pinch_ratio);
+    // Classifier commit gates + IPC scaling
+    write_float_node(gestures_children, "swipe-trigger-distance", settings.swipe_trigger_distance);
+    write_float_node(gestures_children, "edge-start-distance", settings.edge_start_distance);
+    write_float_node(gestures_children, "pinch-trigger-distance", settings.pinch_trigger_distance);
+    write_float_node(gestures_children, "pinch-dominance-ratio", settings.pinch_dominance_ratio);
     write_float_node(gestures_children, "pinch-sensitivity", settings.pinch_sensitivity);
-    write_float_node(gestures_children, "finger-threshold-scale", settings.finger_threshold_scale);
-    write_float_node(gestures_children, "gesture-progress-distance", settings.gesture_progress_distance);
+    write_float_node(gestures_children, "swipe-multi-finger-scale", settings.swipe_multi_finger_scale);
+    write_float_node(gestures_children, "swipe-progress-distance", settings.swipe_progress_distance);
 
     ts_children.nodes_mut().push(gestures_node);
     input_children.nodes_mut().push(ts_node);
@@ -497,12 +497,14 @@ fn parse_touchpad_settings(content: &str) -> TouchpadSettings {
     settings.middle_emulation = tp_children.get("middle-emulation").is_some();
     settings.scroll_factor = read_float_arg(tp_children, "scroll-factor");
 
-    // Gesture recognition threshold
+    // Gesture tuning
     if let Some(gestures_node) = tp_children.get("gestures") {
         if let Some(gestures_children) = gestures_node.children() {
-            read_threshold(gestures_children, &mut settings.recognition_threshold);
-            if let Some(v) = read_float_arg(gestures_children, "gesture-progress-distance") {
-                settings.gesture_progress_distance = v;
+            if let Some(v) = read_float_arg(gestures_children, "swipe-trigger-distance") {
+                settings.swipe_trigger_distance = v;
+            }
+            if let Some(v) = read_float_arg(gestures_children, "swipe-progress-distance") {
+                settings.swipe_progress_distance = v;
             }
         }
     }
@@ -574,8 +576,8 @@ pub fn write_touchpad_settings(settings: &TouchpadSettings) {
     // Gesture settings
     let mut gestures_node = KdlNode::new("gestures");
     let gestures_children = gestures_node.ensure_children();
-    write_threshold(gestures_children, settings.recognition_threshold);
-    write_float_node(gestures_children, "gesture-progress-distance", settings.gesture_progress_distance);
+    write_float_node(gestures_children, "swipe-trigger-distance", settings.swipe_trigger_distance);
+    write_float_node(gestures_children, "swipe-progress-distance", settings.swipe_progress_distance);
 
     tp_children.nodes_mut().push(gestures_node);
     input_children.nodes_mut().push(tp_node);
@@ -622,28 +624,9 @@ fn read_optional_bool(doc: &KdlDocument, name: &str) -> Option<bool> {
     }
 }
 
-fn read_threshold(doc: &KdlDocument, threshold: &mut f64) {
-    if let Some(node) = doc.get("recognition-threshold") {
-        if let Some(entry) = node.entries().first() {
-            if let Some(v) = entry.value().as_float() {
-                *threshold = v;
-            } else if let Some(v) = entry.value().as_integer() {
-                *threshold = v as f64;
-            }
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Shared KDL writers
 // ---------------------------------------------------------------------------
-
-fn write_threshold(doc: &mut KdlDocument, threshold: f64) {
-    let mut node = KdlNode::new("recognition-threshold");
-    let rounded_threshold = (threshold * 100.0).round() / 100.0;
-    node.push(kdl::KdlEntry::new(KdlValue::Float(rounded_threshold)));
-    doc.nodes_mut().push(node);
-}
 
 fn write_string_node(doc: &mut KdlDocument, name: &str, value: &str) {
     let mut node = KdlNode::new(name);

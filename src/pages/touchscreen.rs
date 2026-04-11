@@ -33,11 +33,25 @@ const GESTURE_OPTIONS: &[(&str, &str)] = &[
     // 5-finger pinch
     ("5-Finger Pinch In", "TouchPinch5In"),
     ("5-Finger Pinch Out", "TouchPinch5Out"),
-    // Edge swipes
-    ("Edge Left", "TouchEdgeLeft"),
-    ("Edge Right", "TouchEdgeRight"),
-    ("Edge Top", "TouchEdgeTop"),
-    ("Edge Bottom", "TouchEdgeBottom"),
+    // Edge swipes — parent (any zone)
+    ("Edge Left (any)", "TouchEdgeLeft"),
+    ("Edge Right (any)", "TouchEdgeRight"),
+    ("Edge Top (any)", "TouchEdgeTop"),
+    ("Edge Bottom (any)", "TouchEdgeBottom"),
+    // Edge swipes — top/bottom zones (split along x)
+    ("Edge Top — Left", "TouchEdgeTop:Left"),
+    ("Edge Top — Center", "TouchEdgeTop:Center"),
+    ("Edge Top — Right", "TouchEdgeTop:Right"),
+    ("Edge Bottom — Left", "TouchEdgeBottom:Left"),
+    ("Edge Bottom — Center", "TouchEdgeBottom:Center"),
+    ("Edge Bottom — Right", "TouchEdgeBottom:Right"),
+    // Edge swipes — left/right zones (split along y)
+    ("Edge Left — Top", "TouchEdgeLeft:Top"),
+    ("Edge Left — Center", "TouchEdgeLeft:Center"),
+    ("Edge Left — Bottom", "TouchEdgeLeft:Bottom"),
+    ("Edge Right — Top", "TouchEdgeRight:Top"),
+    ("Edge Right — Center", "TouchEdgeRight:Center"),
+    ("Edge Right — Bottom", "TouchEdgeRight:Bottom"),
 ];
 
 // ---------------------------------------------------------------------------
@@ -229,15 +243,15 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
         .description("Fine-tune how gestures are detected")
         .build();
 
-    add_threshold_row(&thresh_group, settings, "Recognition Threshold",
-        "Pixels before gesture direction locks (swipe + edge)",
-        settings.borrow().recognition_threshold, 4.0, 100.0, 0,
-        |s, v| s.recognition_threshold = v);
+    add_threshold_row(&thresh_group, settings, "Swipe Trigger Distance",
+        "Pixels of centroid movement before a swipe commits",
+        settings.borrow().swipe_trigger_distance, 4.0, 100.0, 0,
+        |s, v| s.swipe_trigger_distance = v);
 
-    add_threshold_row(&thresh_group, settings, "Edge Threshold",
-        "Pixels from screen edge that count as edge zone",
-        settings.borrow().edge_threshold, 5.0, 100.0, 0,
-        |s, v| s.edge_threshold = v);
+    add_threshold_row(&thresh_group, settings, "Edge Start Distance",
+        "Width of the screen-edge start zone (px)",
+        settings.borrow().edge_start_distance, 5.0, 100.0, 0,
+        |s, v| s.edge_start_distance = v);
 
     page.add(&thresh_group);
 
@@ -247,25 +261,25 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
         .description("Tuning for pinch gesture recognition")
         .build();
 
-    add_threshold_row(&pinch_group, settings, "Pinch Threshold",
-        "Minimum spread change (px) to detect pinch",
-        settings.borrow().pinch_threshold, 5.0, 100.0, 0,
-        |s, v| s.pinch_threshold = v);
+    add_threshold_row(&pinch_group, settings, "Pinch Trigger Distance",
+        "Minimum spread change (px) before a pinch commits",
+        settings.borrow().pinch_trigger_distance, 5.0, 100.0, 0,
+        |s, v| s.pinch_trigger_distance = v);
 
-    add_threshold_row(&pinch_group, settings, "Pinch Ratio",
-        "Spread must exceed swipe distance by this factor",
-        settings.borrow().pinch_ratio, 1.0, 5.0, 1,
-        |s, v| s.pinch_ratio = v);
+    add_threshold_row(&pinch_group, settings, "Pinch Dominance Ratio",
+        "Spread must exceed swipe distance by this factor (higher = stricter)",
+        settings.borrow().pinch_dominance_ratio, 1.0, 5.0, 1,
+        |s, v| s.pinch_dominance_ratio = v);
 
     add_threshold_row(&pinch_group, settings, "Pinch Sensitivity",
         "Multiplier for pinch gesture deltas",
         settings.borrow().pinch_sensitivity, 0.01, 5.0, 2,
         |s, v| s.pinch_sensitivity = v);
 
-    add_threshold_row(&pinch_group, settings, "Finger Threshold Scale",
-        "Higher = harder to trigger with more fingers",
-        settings.borrow().finger_threshold_scale, 1.0, 5.0, 1,
-        |s, v| s.finger_threshold_scale = v);
+    add_threshold_row(&pinch_group, settings, "Swipe Multi-Finger Scale",
+        "Extra swipe threshold per finger above 3 (higher = harder with more fingers)",
+        settings.borrow().swipe_multi_finger_scale, 1.0, 5.0, 1,
+        |s, v| s.swipe_multi_finger_scale = v);
 
     page.add(&pinch_group);
 
@@ -278,10 +292,10 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
              niri uses its own internal thresholds to decide when to commit.")
         .build();
 
-    add_threshold_row(&ipc_group, settings, "Gesture Progress Distance",
-        "Screen pixels of movement for IPC progress to reach 1.0",
-        settings.borrow().gesture_progress_distance, 50.0, 1000.0, 0,
-        |s, v| s.gesture_progress_distance = v);
+    add_threshold_row(&ipc_group, settings, "Swipe Progress Distance",
+        "Screen pixels of swipe movement for IPC progress to reach 1.0",
+        settings.borrow().swipe_progress_distance, 50.0, 1000.0, 0,
+        |s, v| s.swipe_progress_distance = v);
 
     page.add(&ipc_group);
 
