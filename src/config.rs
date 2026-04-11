@@ -6,6 +6,9 @@ use kdl::{KdlDocument, KdlEntry, KdlIdentifier, KdlNode, KdlValue};
 const TOUCHSCREEN_GESTURES_FILE: &str = "touchscreen-gestures.kdl";
 const TOUCHPAD_GESTURES_FILE: &str = "touchpad-gestures.kdl";
 
+pub const MIN_FINGERS: u8 = 3;
+pub const MAX_FINGERS: u8 = 10;
+
 // ---------------------------------------------------------------------------
 // KDL v1 <-> v2 compatibility
 // ---------------------------------------------------------------------------
@@ -29,13 +32,341 @@ include \"touchscreen-gestures.kdl\" optional=true\n\
 include \"touchpad-gestures.kdl\" optional=true\n";
 
 // ---------------------------------------------------------------------------
-// Touch bind entry (touchscreen dynamic binds)
+// Structured gesture trigger
+// ---------------------------------------------------------------------------
+//
+// Mirrors niri's property-form trigger model (niri commit 558adc5f).
+// Each variant maps 1:1 to a KDL bind node of the shape:
+//
+//   TouchSwipe    fingers=3 direction="up"                { ... }
+//   TouchPinch    fingers=4 direction="in"                { ... }
+//   TouchRotate   fingers=5 direction="cw"                { ... }
+//   TouchEdge     edge="left"                             { ... }
+//   TouchEdge     edge="top" zone="left"                  { ... }
+//   TouchpadSwipe fingers=3 direction="up"                { ... }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SwipeDir { Up, Down, Left, Right }
+
+impl SwipeDir {
+    pub fn as_kdl(self) -> &'static str {
+        match self {
+            Self::Up => "up",
+            Self::Down => "down",
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+    pub fn display(self) -> &'static str {
+        match self {
+            Self::Up => "Up",
+            Self::Down => "Down",
+            Self::Left => "Left",
+            Self::Right => "Right",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "up" => Some(Self::Up),
+            "down" => Some(Self::Down),
+            "left" => Some(Self::Left),
+            "right" => Some(Self::Right),
+            _ => None,
+        }
+    }
+    pub const ALL: &'static [Self] = &[Self::Up, Self::Down, Self::Left, Self::Right];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PinchDir { In, Out }
+
+impl PinchDir {
+    pub fn as_kdl(self) -> &'static str {
+        match self { Self::In => "in", Self::Out => "out" }
+    }
+    pub fn display(self) -> &'static str {
+        match self { Self::In => "In", Self::Out => "Out" }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "in" => Some(Self::In),
+            "out" => Some(Self::Out),
+            _ => None,
+        }
+    }
+    pub const ALL: &'static [Self] = &[Self::In, Self::Out];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RotateDir { Cw, Ccw }
+
+impl RotateDir {
+    pub fn as_kdl(self) -> &'static str {
+        match self { Self::Cw => "cw", Self::Ccw => "ccw" }
+    }
+    pub fn display(self) -> &'static str {
+        match self { Self::Cw => "Clockwise", Self::Ccw => "Counter-Clockwise" }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "cw" => Some(Self::Cw),
+            "ccw" => Some(Self::Ccw),
+            _ => None,
+        }
+    }
+    pub const ALL: &'static [Self] = &[Self::Cw, Self::Ccw];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Edge { Left, Right, Top, Bottom }
+
+impl Edge {
+    pub fn as_kdl(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+        }
+    }
+    pub fn display(self) -> &'static str {
+        match self {
+            Self::Left => "Left",
+            Self::Right => "Right",
+            Self::Top => "Top",
+            Self::Bottom => "Bottom",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "left" => Some(Self::Left),
+            "right" => Some(Self::Right),
+            "top" => Some(Self::Top),
+            "bottom" => Some(Self::Bottom),
+            _ => None,
+        }
+    }
+    pub const ALL: &'static [Self] = &[Self::Left, Self::Right, Self::Top, Self::Bottom];
+}
+
+/// Which third of an edge a touch landed in. The perpendicular axis of the
+/// edge is split into thirds; the KDL vocabulary rotates per edge axis
+/// (Top/Bottom take left|center|right; Left/Right take top|center|bottom).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EdgeZone { Start, Center, End }
+
+impl EdgeZone {
+    /// The lowercased KDL identifier that niri expects for this
+    /// (edge, zone) pair. The vocabulary rotates per axis.
+    pub fn as_kdl(self, edge: Edge) -> &'static str {
+        match (edge, self) {
+            (Edge::Top | Edge::Bottom, Self::Start) => "left",
+            (Edge::Top | Edge::Bottom, Self::Center) => "center",
+            (Edge::Top | Edge::Bottom, Self::End) => "right",
+            (Edge::Left | Edge::Right, Self::Start) => "top",
+            (Edge::Left | Edge::Right, Self::Center) => "center",
+            (Edge::Left | Edge::Right, Self::End) => "bottom",
+        }
+    }
+    pub fn display(self, edge: Edge) -> &'static str {
+        match (edge, self) {
+            (Edge::Top | Edge::Bottom, Self::Start) => "Left",
+            (Edge::Top | Edge::Bottom, Self::Center) => "Center",
+            (Edge::Top | Edge::Bottom, Self::End) => "Right",
+            (Edge::Left | Edge::Right, Self::Start) => "Top",
+            (Edge::Left | Edge::Right, Self::Center) => "Center",
+            (Edge::Left | Edge::Right, Self::End) => "Bottom",
+        }
+    }
+    /// Inverse of `as_kdl`: given the edge and the KDL zone keyword,
+    /// return the abstract zone. Returns None on invalid combinations.
+    pub fn parse(edge: Edge, s: &str) -> Option<Self> {
+        match (edge, s) {
+            (Edge::Top | Edge::Bottom, "left") => Some(Self::Start),
+            (Edge::Top | Edge::Bottom, "center") => Some(Self::Center),
+            (Edge::Top | Edge::Bottom, "right") => Some(Self::End),
+            (Edge::Left | Edge::Right, "top") => Some(Self::Start),
+            (Edge::Left | Edge::Right, "center") => Some(Self::Center),
+            (Edge::Left | Edge::Right, "bottom") => Some(Self::End),
+            _ => None,
+        }
+    }
+    pub const ALL: &'static [Self] = &[Self::Start, Self::Center, Self::End];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Trigger {
+    TouchSwipe    { fingers: u8, direction: SwipeDir },
+    TouchPinch    { fingers: u8, direction: PinchDir },
+    TouchRotate   { fingers: u8, direction: RotateDir },
+    TouchEdge     { edge: Edge, zone: Option<EdgeZone> },
+    TouchpadSwipe { fingers: u8, direction: SwipeDir },
+}
+
+impl Trigger {
+    /// The bare KDL node name (family) without any properties.
+    pub fn kdl_family(self) -> &'static str {
+        match self {
+            Self::TouchSwipe { .. } => "TouchSwipe",
+            Self::TouchPinch { .. } => "TouchPinch",
+            Self::TouchRotate { .. } => "TouchRotate",
+            Self::TouchEdge { .. } => "TouchEdge",
+            Self::TouchpadSwipe { .. } => "TouchpadSwipe",
+        }
+    }
+
+    /// Stable dedup/equality key (used to find or delete binds without
+    /// relying on struct hashing through interior fields).
+    pub fn key(self) -> String {
+        match self {
+            Self::TouchSwipe { fingers, direction } => {
+                format!("TouchSwipe:{fingers}:{}", direction.as_kdl())
+            }
+            Self::TouchPinch { fingers, direction } => {
+                format!("TouchPinch:{fingers}:{}", direction.as_kdl())
+            }
+            Self::TouchRotate { fingers, direction } => {
+                format!("TouchRotate:{fingers}:{}", direction.as_kdl())
+            }
+            Self::TouchEdge { edge, zone } => {
+                let z = zone.map(|z| z.as_kdl(edge)).unwrap_or("full");
+                format!("TouchEdge:{}:{z}", edge.as_kdl())
+            }
+            Self::TouchpadSwipe { fingers, direction } => {
+                format!("TouchpadSwipe:{fingers}:{}", direction.as_kdl())
+            }
+        }
+    }
+
+    /// Human-readable label used in UI list/rows.
+    pub fn display_name(self) -> String {
+        match self {
+            Self::TouchSwipe { fingers, direction } => {
+                format!("{fingers}-Finger Swipe {}", direction.display())
+            }
+            Self::TouchPinch { fingers, direction } => {
+                format!("{fingers}-Finger Pinch {}", direction.display())
+            }
+            Self::TouchRotate { fingers, direction } => {
+                format!("{fingers}-Finger Rotate {}", direction.display())
+            }
+            Self::TouchEdge { edge, zone: None } => {
+                format!("Edge {} (full)", edge.display())
+            }
+            Self::TouchEdge { edge, zone: Some(z) } => {
+                format!("Edge {} — {}", edge.display(), z.display(edge))
+            }
+            Self::TouchpadSwipe { fingers, direction } => {
+                format!("{fingers}-Finger Swipe {}", direction.display())
+            }
+        }
+    }
+
+    /// Parse a KDL node (by its name + property entries) into a Trigger.
+    /// Returns None for unrecognized families or invalid property
+    /// combinations. Modifier prefixes (`Mod+TouchSwipe`) are stripped.
+    pub fn parse_node(node: &KdlNode) -> Option<Self> {
+        let name = node.name().to_string();
+        let family = name.rsplit('+').next().unwrap_or(&name);
+
+        let get_int = |k: &str| -> Option<u8> {
+            node.get(k).and_then(|v| v.as_integer()).and_then(|i| u8::try_from(i).ok())
+        };
+        let get_str = |k: &str| -> Option<String> {
+            node.get(k).and_then(|v| v.as_string()).map(|s| s.to_string())
+        };
+
+        match family {
+            "TouchSwipe" => {
+                let fingers = get_int("fingers")?;
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                let direction = SwipeDir::parse(&get_str("direction")?)?;
+                Some(Self::TouchSwipe { fingers, direction })
+            }
+            "TouchPinch" => {
+                let fingers = get_int("fingers")?;
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                let direction = PinchDir::parse(&get_str("direction")?)?;
+                Some(Self::TouchPinch { fingers, direction })
+            }
+            "TouchRotate" => {
+                let fingers = get_int("fingers")?;
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                let direction = RotateDir::parse(&get_str("direction")?)?;
+                Some(Self::TouchRotate { fingers, direction })
+            }
+            "TouchEdge" => {
+                let edge = Edge::parse(&get_str("edge")?)?;
+                let zone = match get_str("zone") {
+                    Some(z) => Some(EdgeZone::parse(edge, &z)?),
+                    None => None,
+                };
+                Some(Self::TouchEdge { edge, zone })
+            }
+            "TouchpadSwipe" => {
+                let fingers = get_int("fingers")?;
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                let direction = SwipeDir::parse(&get_str("direction")?)?;
+                Some(Self::TouchpadSwipe { fingers, direction })
+            }
+            _ => None,
+        }
+    }
+
+    /// Populate a freshly-created `KdlNode` (already named with `kdl_family()`)
+    /// with the property entries for this trigger. Strings are written with
+    /// forced double-quoted repr because niri's knuffel parser requires it.
+    pub fn write_props(self, node: &mut KdlNode) {
+        match self {
+            Self::TouchSwipe { fingers, direction }
+            | Self::TouchpadSwipe { fingers, direction } => {
+                push_int_prop(node, "fingers", fingers as i128);
+                push_string_prop(node, "direction", direction.as_kdl());
+            }
+            Self::TouchPinch { fingers, direction } => {
+                push_int_prop(node, "fingers", fingers as i128);
+                push_string_prop(node, "direction", direction.as_kdl());
+            }
+            Self::TouchRotate { fingers, direction } => {
+                push_int_prop(node, "fingers", fingers as i128);
+                push_string_prop(node, "direction", direction.as_kdl());
+            }
+            Self::TouchEdge { edge, zone } => {
+                push_string_prop(node, "edge", edge.as_kdl());
+                if let Some(z) = zone {
+                    push_string_prop(node, "zone", z.as_kdl(edge));
+                }
+            }
+        }
+    }
+}
+
+/// Push a property entry like `direction="up"` with forced quoted repr.
+fn push_string_prop(node: &mut KdlNode, key: &str, value: &str) {
+    let mut entry = KdlEntry::new(KdlValue::String(value.to_string()));
+    entry.set_name(Some(KdlIdentifier::from(key)));
+    let mut fmt = kdl::KdlEntryFormat::default();
+    fmt.value_repr = format!("\"{}\"", value);
+    fmt.autoformat_keep = true;
+    entry.set_format(fmt);
+    node.push(entry);
+}
+
+/// Push an integer property entry like `fingers=4`.
+fn push_int_prop(node: &mut KdlNode, key: &str, value: i128) {
+    let mut entry = KdlEntry::new(KdlValue::Integer(value));
+    entry.set_name(Some(KdlIdentifier::from(key)));
+    node.push(entry);
+}
+
+// ---------------------------------------------------------------------------
+// Touch bind entry (touchscreen + touchpad dynamic binds)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct TouchBindEntry {
-    /// KDL node name, e.g. "TouchSwipe3Up", "TouchEdgeLeft"
-    pub gesture_name: String,
+    /// Structured gesture trigger (family + properties).
+    pub trigger: Trigger,
     /// Action KDL name, e.g. "focus-workspace-up", "close-window", "spawn", "noop"
     pub action_name: String,
     /// Arguments for actions that take them (e.g. spawn "alacritty")
@@ -46,7 +377,7 @@ pub struct TouchBindEntry {
     pub natural_scroll: bool,
     /// IPC tag for gesture events (external tool integration)
     pub tag: Option<String>,
-    /// Whether this bind is enabled (disabled binds are commented out with /-)
+    /// Whether this bind is enabled (disabled binds are dropped on write)
     pub enabled: bool,
 }
 
@@ -66,6 +397,10 @@ pub struct TouchscreenSettings {
     pub pinch_dominance_ratio: f64,
     pub pinch_sensitivity: f64,
     pub swipe_multi_finger_scale: f64,
+    // Rotation detection
+    pub rotation_trigger_angle: f64,
+    pub rotation_dominance_ratio: f64,
+    pub rotation_progress_angle: f64,
     // IPC progress scaling
     pub swipe_progress_distance: f64,
     // Dynamic touch binds
@@ -74,16 +409,21 @@ pub struct TouchscreenSettings {
 
 impl Default for TouchscreenSettings {
     fn default() -> Self {
+        // Values match niri's current Touchscreen defaults
+        // (niri-config/src/input.rs).
         Self {
             off: false,
             natural_scroll: false,
             map_to_output: None,
-            swipe_trigger_distance: 16.0,
-            edge_start_distance: 20.0,
-            pinch_trigger_distance: 20.0,
-            pinch_dominance_ratio: 2.0,
+            swipe_trigger_distance: 100.0,
+            edge_start_distance: 30.0,
+            pinch_trigger_distance: 100.0,
+            pinch_dominance_ratio: 1.0,
             pinch_sensitivity: 1.0,
-            swipe_multi_finger_scale: 2.6,
+            swipe_multi_finger_scale: 1.2,
+            rotation_trigger_angle: 20.0,
+            rotation_dominance_ratio: 0.5,
+            rotation_progress_angle: 90.0,
             swipe_progress_distance: 200.0,
             binds: Vec::new(),
         }
@@ -244,30 +584,39 @@ fn parse_touchscreen_settings(content: &str) -> TouchscreenSettings {
         }
     }
 
-    let Some(gestures_node) = ts_children.get("gestures") else { return settings };
-    let Some(gestures_children) = gestures_node.children() else { return settings };
-
-    // Classifier commit gates + IPC scaling
-    if let Some(v) = read_float_arg(gestures_children, "swipe-trigger-distance") {
-        settings.swipe_trigger_distance = v;
-    }
-    if let Some(v) = read_float_arg(gestures_children, "edge-start-distance") {
-        settings.edge_start_distance = v;
-    }
-    if let Some(v) = read_float_arg(gestures_children, "pinch-trigger-distance") {
-        settings.pinch_trigger_distance = v;
-    }
-    if let Some(v) = read_float_arg(gestures_children, "pinch-dominance-ratio") {
-        settings.pinch_dominance_ratio = v;
-    }
-    if let Some(v) = read_float_arg(gestures_children, "pinch-sensitivity") {
-        settings.pinch_sensitivity = v;
-    }
-    if let Some(v) = read_float_arg(gestures_children, "swipe-multi-finger-scale") {
-        settings.swipe_multi_finger_scale = v;
-    }
-    if let Some(v) = read_float_arg(gestures_children, "swipe-progress-distance") {
-        settings.swipe_progress_distance = v;
+    if let Some(gestures_node) = ts_children.get("gestures") {
+        if let Some(gestures_children) = gestures_node.children() {
+            if let Some(v) = read_float_arg(gestures_children, "swipe-trigger-distance") {
+                settings.swipe_trigger_distance = v;
+            }
+            if let Some(v) = read_float_arg(gestures_children, "edge-start-distance") {
+                settings.edge_start_distance = v;
+            }
+            if let Some(v) = read_float_arg(gestures_children, "pinch-trigger-distance") {
+                settings.pinch_trigger_distance = v;
+            }
+            if let Some(v) = read_float_arg(gestures_children, "pinch-dominance-ratio") {
+                settings.pinch_dominance_ratio = v;
+            }
+            if let Some(v) = read_float_arg(gestures_children, "pinch-sensitivity") {
+                settings.pinch_sensitivity = v;
+            }
+            if let Some(v) = read_float_arg(gestures_children, "swipe-multi-finger-scale") {
+                settings.swipe_multi_finger_scale = v;
+            }
+            if let Some(v) = read_float_arg(gestures_children, "rotation-trigger-angle") {
+                settings.rotation_trigger_angle = v;
+            }
+            if let Some(v) = read_float_arg(gestures_children, "rotation-dominance-ratio") {
+                settings.rotation_dominance_ratio = v;
+            }
+            if let Some(v) = read_float_arg(gestures_children, "rotation-progress-angle") {
+                settings.rotation_progress_angle = v;
+            }
+            if let Some(v) = read_float_arg(gestures_children, "swipe-progress-distance") {
+                settings.swipe_progress_distance = v;
+            }
+        }
     }
 
     // Gesture binds — now in a top-level `binds {}` block (same file or main config)
@@ -280,29 +629,14 @@ fn parse_touchscreen_settings(content: &str) -> TouchscreenSettings {
     settings
 }
 
-/// Check if a node name is a gesture trigger (Touch* or Touchpad* or Mod+Touch*).
-fn is_gesture_bind(name: &str) -> bool {
-    // Handle modifier prefixes like "Mod+TouchSwipe3Up"
-    let trigger = if let Some(pos) = name.rfind('+') {
-        &name[pos + 1..]
-    } else {
-        name
-    };
-    trigger.starts_with("Touch") || trigger.starts_with("Touchpad")
-}
-
-/// Read gesture binds from a `binds {}` KdlDocument.
-/// Filters to only Touch*/Touchpad* nodes.
+/// Read gesture binds from a `binds {}` KdlDocument. Filters to only
+/// nodes whose name (stripped of any modifier prefix) parses as a
+/// known Trigger family with valid properties.
 fn read_gesture_binds(binds_doc: &KdlDocument) -> Vec<TouchBindEntry> {
     let mut binds = Vec::new();
 
     for node in binds_doc.nodes() {
-        let gesture_name = node.name().to_string();
-
-        // Only read gesture binds, skip keyboard/mouse
-        if !is_gesture_bind(&gesture_name) {
-            continue;
-        }
+        let Some(trigger) = Trigger::parse_node(node) else { continue };
 
         // Read properties: sensitivity, natural-scroll, tag
         let sensitivity = node.get("sensitivity").and_then(|v| {
@@ -336,7 +670,7 @@ fn read_gesture_binds(binds_doc: &KdlDocument) -> Vec<TouchBindEntry> {
 
         if !action_name.is_empty() {
             binds.push(TouchBindEntry {
-                gesture_name,
+                trigger,
                 action_name,
                 action_args,
                 sensitivity,
@@ -377,13 +711,16 @@ pub fn write_touchscreen_settings(settings: &TouchscreenSettings) {
     let mut gestures_node = KdlNode::new("gestures");
     let gestures_children = gestures_node.ensure_children();
 
-    // Classifier commit gates + IPC scaling
+    // Classifier commit gates + rotation detection + IPC scaling
     write_float_node(gestures_children, "swipe-trigger-distance", settings.swipe_trigger_distance);
     write_float_node(gestures_children, "edge-start-distance", settings.edge_start_distance);
     write_float_node(gestures_children, "pinch-trigger-distance", settings.pinch_trigger_distance);
     write_float_node(gestures_children, "pinch-dominance-ratio", settings.pinch_dominance_ratio);
     write_float_node(gestures_children, "pinch-sensitivity", settings.pinch_sensitivity);
     write_float_node(gestures_children, "swipe-multi-finger-scale", settings.swipe_multi_finger_scale);
+    write_float_node(gestures_children, "rotation-trigger-angle", settings.rotation_trigger_angle);
+    write_float_node(gestures_children, "rotation-dominance-ratio", settings.rotation_dominance_ratio);
+    write_float_node(gestures_children, "rotation-progress-angle", settings.rotation_progress_angle);
     write_float_node(gestures_children, "swipe-progress-distance", settings.swipe_progress_distance);
 
     ts_children.nodes_mut().push(gestures_node);
@@ -396,9 +733,8 @@ pub fn write_touchscreen_settings(settings: &TouchscreenSettings) {
     write_config_file(&touchscreen_config_path(), &mut doc);
 }
 
-/// Write gesture binds as a top-level `binds {}` block.
-/// Niri's include merge replaces matching bind keys, so this safely
-/// coexists with the user's keyboard/mouse binds in config.kdl.
+/// Write gesture binds as a top-level `binds {}` block using the
+/// property-form trigger syntax niri requires.
 fn write_gesture_binds(doc: &mut KdlDocument, binds: &[TouchBindEntry]) {
     if binds.is_empty() {
         return;
@@ -409,20 +745,18 @@ fn write_gesture_binds(doc: &mut KdlDocument, binds: &[TouchBindEntry]) {
 
     for bind in binds {
         if !bind.enabled {
-            continue; // Skip disabled binds
+            continue;
         }
 
-        let mut node = KdlNode::new(bind.gesture_name.as_str());
+        let mut node = KdlNode::new(bind.trigger.kdl_family());
 
-        // Properties: tag, sensitivity, natural-scroll
+        // Trigger properties (fingers, direction, edge, zone) go first
+        // so the node name reads naturally when autoformatted.
+        bind.trigger.write_props(&mut node);
+
+        // User-facing bind properties: tag, sensitivity, natural-scroll
         if let Some(ref tag) = bind.tag {
-            let mut entry = KdlEntry::new(KdlValue::String(tag.clone()));
-            entry.set_name(Some(KdlIdentifier::from("tag")));
-            let mut fmt = kdl::KdlEntryFormat::default();
-            fmt.value_repr = format!("\"{}\"", tag);
-            fmt.autoformat_keep = true;
-            entry.set_format(fmt);
-            node.push(entry);
+            push_string_prop(&mut node, "tag", tag);
         }
 
         if let Some(sens) = bind.sensitivity {

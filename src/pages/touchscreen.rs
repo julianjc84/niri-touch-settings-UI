@@ -2,57 +2,10 @@ use adw::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::config::{self, TouchBindEntry, TouchscreenSettings};
-
-// ---------------------------------------------------------------------------
-// Gesture presets: (display name, KDL node name)
-// ---------------------------------------------------------------------------
-
-const GESTURE_OPTIONS: &[(&str, &str)] = &[
-    // 3-finger swipes
-    ("3-Finger Swipe Up", "TouchSwipe3Up"),
-    ("3-Finger Swipe Down", "TouchSwipe3Down"),
-    ("3-Finger Swipe Left", "TouchSwipe3Left"),
-    ("3-Finger Swipe Right", "TouchSwipe3Right"),
-    // 4-finger swipes
-    ("4-Finger Swipe Up", "TouchSwipe4Up"),
-    ("4-Finger Swipe Down", "TouchSwipe4Down"),
-    ("4-Finger Swipe Left", "TouchSwipe4Left"),
-    ("4-Finger Swipe Right", "TouchSwipe4Right"),
-    // 5-finger swipes
-    ("5-Finger Swipe Up", "TouchSwipe5Up"),
-    ("5-Finger Swipe Down", "TouchSwipe5Down"),
-    ("5-Finger Swipe Left", "TouchSwipe5Left"),
-    ("5-Finger Swipe Right", "TouchSwipe5Right"),
-    // 3-finger pinch
-    ("3-Finger Pinch In", "TouchPinch3In"),
-    ("3-Finger Pinch Out", "TouchPinch3Out"),
-    // 4-finger pinch
-    ("4-Finger Pinch In", "TouchPinch4In"),
-    ("4-Finger Pinch Out", "TouchPinch4Out"),
-    // 5-finger pinch
-    ("5-Finger Pinch In", "TouchPinch5In"),
-    ("5-Finger Pinch Out", "TouchPinch5Out"),
-    // Edge swipes — parent (any zone)
-    ("Edge Left (any)", "TouchEdgeLeft"),
-    ("Edge Right (any)", "TouchEdgeRight"),
-    ("Edge Top (any)", "TouchEdgeTop"),
-    ("Edge Bottom (any)", "TouchEdgeBottom"),
-    // Edge swipes — top/bottom zones (split along x)
-    ("Edge Top — Left", "TouchEdgeTop:Left"),
-    ("Edge Top — Center", "TouchEdgeTop:Center"),
-    ("Edge Top — Right", "TouchEdgeTop:Right"),
-    ("Edge Bottom — Left", "TouchEdgeBottom:Left"),
-    ("Edge Bottom — Center", "TouchEdgeBottom:Center"),
-    ("Edge Bottom — Right", "TouchEdgeBottom:Right"),
-    // Edge swipes — left/right zones (split along y)
-    ("Edge Left — Top", "TouchEdgeLeft:Top"),
-    ("Edge Left — Center", "TouchEdgeLeft:Center"),
-    ("Edge Left — Bottom", "TouchEdgeLeft:Bottom"),
-    ("Edge Right — Top", "TouchEdgeRight:Top"),
-    ("Edge Right — Center", "TouchEdgeRight:Center"),
-    ("Edge Right — Bottom", "TouchEdgeRight:Bottom"),
-];
+use crate::config::{
+    self, Edge, EdgeZone, PinchDir, RotateDir, SwipeDir, TouchBindEntry, TouchscreenSettings,
+    Trigger, MAX_FINGERS, MIN_FINGERS,
+};
 
 // ---------------------------------------------------------------------------
 // Curated action list: (display name, KDL action name)
@@ -103,71 +56,45 @@ const ACTION_OPTIONS: &[(&str, &str)] = &[
 ];
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Gesture family (UI-only)
 // ---------------------------------------------------------------------------
 
-/// Convert a KDL gesture name to a human-readable display name.
-fn display_gesture_name(kdl_name: &str) -> String {
-    // Check presets first
-    if let Some((display, _)) = GESTURE_OPTIONS.iter().find(|(_, k)| *k == kdl_name) {
-        return display.to_string();
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Family { Swipe, Pinch, Rotate, Edge }
+
+impl Family {
+    fn all_labels() -> [&'static str; 4] {
+        ["Swipe", "Pinch", "Rotate", "Edge"]
     }
-
-    // Parse unknown names: Touch{N}{Type}{Dir} or TouchEdge{Dir}
-    let lower = kdl_name.to_ascii_lowercase();
-
-    if let Some(edge) = lower.strip_prefix("touchedge") {
-        let dir = capitalize(edge);
-        return format!("Edge {dir}");
-    }
-
-    if let Some(rest) = lower.strip_prefix("touch") {
-        let digit_end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
-        if digit_end > 0 {
-            let fingers = &rest[..digit_end];
-            let gesture_rest = &rest[digit_end..];
-
-            let (gtype, dir) = if let Some(d) = gesture_rest.strip_prefix("swipe") {
-                ("Swipe", d)
-            } else if let Some(d) = gesture_rest.strip_prefix("pinch") {
-                ("Pinch", d)
-            } else {
-                (gesture_rest, "")
-            };
-
-            let type_display = capitalize(gtype);
-            let dir_display = capitalize(dir);
-            return format!("{fingers}-Finger {type_display} {dir_display}");
+    fn from_index(i: u32) -> Self {
+        match i {
+            0 => Self::Swipe,
+            1 => Self::Pinch,
+            2 => Self::Rotate,
+            _ => Self::Edge,
         }
     }
-
-    kdl_name.to_string()
 }
 
-/// Convert a KDL action name to a human-readable display name.
 fn display_action_name(action_name: &str, action_args: &[String]) -> String {
     if action_name == "spawn" && !action_args.is_empty() {
         return format!("Spawn: {}", action_args.join(" "));
     }
-
     if let Some((display, _)) = ACTION_OPTIONS.iter().find(|(_, k)| *k == action_name) {
         return display.to_string();
     }
-
     // Fallback: kebab-case to Title Case
     action_name
         .split('-')
-        .map(|w| capitalize(w))
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -245,13 +172,18 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
 
     add_threshold_row(&thresh_group, settings, "Swipe Trigger Distance",
         "Pixels of centroid movement before a swipe commits",
-        settings.borrow().swipe_trigger_distance, 4.0, 100.0, 0,
+        settings.borrow().swipe_trigger_distance, 4.0, 500.0, 0,
         |s, v| s.swipe_trigger_distance = v);
 
     add_threshold_row(&thresh_group, settings, "Edge Start Distance",
         "Width of the screen-edge start zone (px)",
-        settings.borrow().edge_start_distance, 5.0, 100.0, 0,
+        settings.borrow().edge_start_distance, 5.0, 200.0, 0,
         |s, v| s.edge_start_distance = v);
+
+    add_threshold_row(&thresh_group, settings, "Swipe Multi-Finger Scale",
+        "Extra swipe threshold per finger above 3 (higher = harder with more fingers)",
+        settings.borrow().swipe_multi_finger_scale, 1.0, 5.0, 1,
+        |s, v| s.swipe_multi_finger_scale = v);
 
     page.add(&thresh_group);
 
@@ -263,12 +195,12 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
 
     add_threshold_row(&pinch_group, settings, "Pinch Trigger Distance",
         "Minimum spread change (px) before a pinch commits",
-        settings.borrow().pinch_trigger_distance, 5.0, 100.0, 0,
+        settings.borrow().pinch_trigger_distance, 5.0, 500.0, 0,
         |s, v| s.pinch_trigger_distance = v);
 
     add_threshold_row(&pinch_group, settings, "Pinch Dominance Ratio",
-        "Spread must exceed swipe distance by this factor (higher = stricter)",
-        settings.borrow().pinch_dominance_ratio, 1.0, 5.0, 1,
+        "Spread must exceed swipe distance by this factor (higher = stricter pinch)",
+        settings.borrow().pinch_dominance_ratio, 0.1, 5.0, 1,
         |s, v| s.pinch_dominance_ratio = v);
 
     add_threshold_row(&pinch_group, settings, "Pinch Sensitivity",
@@ -276,12 +208,30 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
         settings.borrow().pinch_sensitivity, 0.01, 5.0, 2,
         |s, v| s.pinch_sensitivity = v);
 
-    add_threshold_row(&pinch_group, settings, "Swipe Multi-Finger Scale",
-        "Extra swipe threshold per finger above 3 (higher = harder with more fingers)",
-        settings.borrow().swipe_multi_finger_scale, 1.0, 5.0, 1,
-        |s, v| s.swipe_multi_finger_scale = v);
-
     page.add(&pinch_group);
+
+    // Rotation detection
+    let rot_group = adw::PreferencesGroup::builder()
+        .title("Rotation Detection")
+        .description("Tuning for rotation gesture recognition")
+        .build();
+
+    add_threshold_row(&rot_group, settings, "Rotation Trigger Angle",
+        "Minimum rotation (degrees) before a rotate commits",
+        settings.borrow().rotation_trigger_angle, 1.0, 180.0, 0,
+        |s, v| s.rotation_trigger_angle = v);
+
+    add_threshold_row(&rot_group, settings, "Rotation Dominance Ratio",
+        "Rotation arc must exceed swipe+spread by this factor (higher = stricter rotate)",
+        settings.borrow().rotation_dominance_ratio, 0.1, 5.0, 1,
+        |s, v| s.rotation_dominance_ratio = v);
+
+    add_threshold_row(&rot_group, settings, "Rotation Progress Angle",
+        "Degrees of rotation for IPC progress to reach 1.0",
+        settings.borrow().rotation_progress_angle, 10.0, 360.0, 0,
+        |s, v| s.rotation_progress_angle = v);
+
+    page.add(&rot_group);
 
     // IPC progress scaling
     let ipc_group = adw::PreferencesGroup::builder()
@@ -382,8 +332,9 @@ fn build_bind_row(
     group: &Rc<adw::PreferencesGroup>,
     settings: &Rc<RefCell<TouchscreenSettings>>,
 ) -> adw::ExpanderRow {
-    let gesture_display = display_gesture_name(&bind.gesture_name);
+    let gesture_display = bind.trigger.display_name();
     let action_display = display_action_name(&bind.action_name, &bind.action_args);
+    let key = bind.trigger.key();
 
     let row = adw::ExpanderRow::builder()
         .title(&gesture_display)
@@ -397,11 +348,11 @@ fn build_bind_row(
         .build();
 
     {
-        let gesture_name = bind.gesture_name.clone();
+        let key = key.clone();
         let settings = settings.clone();
         enable_switch.connect_active_notify(move |switch| {
             if let Some(b) = settings.borrow_mut().binds.iter_mut()
-                .find(|b| b.gesture_name == gesture_name)
+                .find(|b| b.trigger.key() == key)
             {
                 b.enabled = switch.is_active();
             }
@@ -418,7 +369,7 @@ fn build_bind_row(
         .build();
 
     {
-        let gesture_name = bind.gesture_name.clone();
+        let key = key.clone();
         let gesture_display = gesture_display.clone();
         let row_clone = row.clone();
         let group = group.clone();
@@ -435,13 +386,13 @@ fn build_bind_row(
             dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
             dialog.set_default_response(Some("cancel"));
 
-            let gesture_name = gesture_name.clone();
+            let key = key.clone();
             let row_clone = row_clone.clone();
             let group = group.clone();
             let settings = settings.clone();
             dialog.connect_response(None, move |_, response| {
                 if response == "delete" {
-                    settings.borrow_mut().binds.retain(|b| b.gesture_name != gesture_name);
+                    settings.borrow_mut().binds.retain(|b| b.trigger.key() != key);
                     save_and_reload(&settings.borrow());
                     group.remove(&row_clone);
                 }
@@ -467,7 +418,7 @@ fn build_bind_row(
     action_combo.set_selected(current_idx);
 
     {
-        let gesture_name = bind.gesture_name.clone();
+        let key = key.clone();
         let settings = settings.clone();
         let row_ref = row.clone();
         action_combo.connect_selected_notify(move |combo| {
@@ -477,7 +428,7 @@ fn build_bind_row(
             let new_display = ACTION_OPTIONS[idx].0;
 
             if let Some(b) = settings.borrow_mut().binds.iter_mut()
-                .find(|b| b.gesture_name == gesture_name)
+                .find(|b| b.trigger.key() == key)
             {
                 b.action_name = new_action;
                 b.action_args.clear();
@@ -500,11 +451,11 @@ fn build_bind_row(
         .build();
 
     {
-        let gesture_name = bind.gesture_name.clone();
+        let key = key.clone();
         let settings = settings.clone();
         sens_row.connect_value_notify(move |spin| {
             if let Some(b) = settings.borrow_mut().binds.iter_mut()
-                .find(|b| b.gesture_name == gesture_name)
+                .find(|b| b.trigger.key() == key)
             {
                 b.sensitivity = Some(spin.value());
             }
@@ -521,11 +472,11 @@ fn build_bind_row(
         .build();
 
     {
-        let gesture_name = bind.gesture_name.clone();
+        let key = key.clone();
         let settings = settings.clone();
         natural_row.connect_active_notify(move |switch| {
             if let Some(b) = settings.borrow_mut().binds.iter_mut()
-                .find(|b| b.gesture_name == gesture_name)
+                .find(|b| b.trigger.key() == key)
             {
                 b.natural_scroll = switch.is_active();
             }
@@ -541,12 +492,12 @@ fn build_bind_row(
         .build();
 
     {
-        let gesture_name = bind.gesture_name.clone();
+        let key = key.clone();
         let settings = settings.clone();
         tag_row.connect_changed(move |entry| {
             let text = entry.text().to_string();
             if let Some(b) = settings.borrow_mut().binds.iter_mut()
-                .find(|b| b.gesture_name == gesture_name)
+                .find(|b| b.trigger.key() == key)
             {
                 b.tag = if text.is_empty() { None } else { Some(text) };
             }
@@ -559,7 +510,7 @@ fn build_bind_row(
 }
 
 // ---------------------------------------------------------------------------
-// Add bind form
+// Add bind form — nested picker for the property-form trigger schema
 // ---------------------------------------------------------------------------
 
 fn build_add_form(
@@ -570,15 +521,60 @@ fn build_add_form(
         .title("Add New Bind")
         .build();
 
-    // Gesture dropdown
-    let gesture_labels: Vec<&str> = GESTURE_OPTIONS.iter().map(|(d, _)| *d).collect();
-    let gesture_model = gtk::StringList::new(&gesture_labels);
-    let gesture_combo = adw::ComboRow::builder()
-        .title("Gesture")
-        .model(&gesture_model)
+    // Family selector (Swipe / Pinch / Rotate / Edge)
+    let family_labels: [&str; 4] = Family::all_labels();
+    let family_model = gtk::StringList::new(&family_labels);
+    let family_combo = adw::ComboRow::builder()
+        .title("Gesture Family")
+        .model(&family_model)
         .selected(0)
         .build();
-    group.add(&gesture_combo);
+    group.add(&family_combo);
+
+    // Fingers (Swipe/Pinch/Rotate only)
+    let fingers_row = adw::SpinRow::builder()
+        .title("Fingers")
+        .subtitle("Number of fingers required")
+        .adjustment(&gtk::Adjustment::new(
+            3.0,
+            MIN_FINGERS as f64,
+            MAX_FINGERS as f64,
+            1.0, 1.0, 0.0,
+        ))
+        .build();
+    group.add(&fingers_row);
+
+    // Direction (Swipe/Pinch/Rotate — vocab changes per family)
+    // Model is replaced wholesale when family changes; start on Swipe.
+    let dir_labels_swipe = ["Up", "Down", "Left", "Right"];
+    let dir_model = gtk::StringList::new(&dir_labels_swipe);
+    let dir_combo = adw::ComboRow::builder()
+        .title("Direction")
+        .model(&dir_model)
+        .selected(0)
+        .build();
+    group.add(&dir_combo);
+
+    // Edge selector (Edge family only)
+    let edge_labels = ["Left", "Right", "Top", "Bottom"];
+    let edge_model = gtk::StringList::new(&edge_labels);
+    let edge_combo = adw::ComboRow::builder()
+        .title("Edge")
+        .model(&edge_model)
+        .selected(0)
+        .visible(false)
+        .build();
+    group.add(&edge_combo);
+
+    // Zone selector (Edge family only) — vocab rotates per axis.
+    let zone_model = gtk::StringList::new(&["Full", "Top", "Center", "Bottom"]);
+    let zone_combo = adw::ComboRow::builder()
+        .title("Zone")
+        .model(&zone_model)
+        .selected(0)
+        .visible(false)
+        .build();
+    group.add(&zone_combo);
 
     // Action dropdown
     let action_labels: Vec<&str> = ACTION_OPTIONS.iter().map(|(d, _)| *d).collect();
@@ -596,6 +592,63 @@ fn build_add_form(
         .visible(false)
         .build();
     group.add(&spawn_entry);
+
+    // React to family changes: swap direction vocab / show/hide edge rows.
+    {
+        let fingers_row = fingers_row.clone();
+        let dir_combo = dir_combo.clone();
+        let edge_combo = edge_combo.clone();
+        let zone_combo = zone_combo.clone();
+        family_combo.connect_selected_notify(move |combo| {
+            let family = Family::from_index(combo.selected());
+            match family {
+                Family::Swipe => {
+                    fingers_row.set_visible(true);
+                    dir_combo.set_visible(true);
+                    dir_combo.set_model(Some(&gtk::StringList::new(&["Up", "Down", "Left", "Right"])));
+                    dir_combo.set_selected(0);
+                    edge_combo.set_visible(false);
+                    zone_combo.set_visible(false);
+                }
+                Family::Pinch => {
+                    fingers_row.set_visible(true);
+                    dir_combo.set_visible(true);
+                    dir_combo.set_model(Some(&gtk::StringList::new(&["In", "Out"])));
+                    dir_combo.set_selected(0);
+                    edge_combo.set_visible(false);
+                    zone_combo.set_visible(false);
+                }
+                Family::Rotate => {
+                    fingers_row.set_visible(true);
+                    dir_combo.set_visible(true);
+                    dir_combo.set_model(Some(&gtk::StringList::new(&["Clockwise", "Counter-Clockwise"])));
+                    dir_combo.set_selected(0);
+                    edge_combo.set_visible(false);
+                    zone_combo.set_visible(false);
+                }
+                Family::Edge => {
+                    fingers_row.set_visible(false);
+                    dir_combo.set_visible(false);
+                    edge_combo.set_visible(true);
+                    zone_combo.set_visible(true);
+                }
+            }
+        });
+    }
+
+    // React to edge changes: re-label zone options per axis.
+    {
+        let zone_combo = zone_combo.clone();
+        edge_combo.connect_selected_notify(move |combo| {
+            let edge_idx = combo.selected();
+            let new_labels: [&str; 4] = match edge_idx {
+                0 | 1 => ["Full", "Top", "Center", "Bottom"], // Left / Right → y-axis
+                _ => ["Full", "Left", "Center", "Right"],     // Top / Bottom → x-axis
+            };
+            zone_combo.set_model(Some(&gtk::StringList::new(&new_labels)));
+            zone_combo.set_selected(0);
+        });
+    }
 
     // Show/hide spawn entry based on action selection
     {
@@ -618,23 +671,52 @@ fn build_add_form(
     {
         let settings = settings.clone();
         let binds_group = binds_group.clone();
-        let gesture_combo = gesture_combo.clone();
+        let family_combo = family_combo.clone();
+        let fingers_row = fingers_row.clone();
+        let dir_combo = dir_combo.clone();
+        let edge_combo = edge_combo.clone();
+        let zone_combo = zone_combo.clone();
         let action_combo = action_combo.clone();
         let spawn_entry = spawn_entry.clone();
 
         add_row.connect_activated(move |_| {
-            let gesture_idx = gesture_combo.selected() as usize;
+            let family = Family::from_index(family_combo.selected());
+            let fingers = fingers_row.value() as u8;
+            let dir_idx = dir_combo.selected();
+            let edge_idx = edge_combo.selected();
+            let zone_idx = zone_combo.selected();
+
+            let trigger = match family {
+                Family::Swipe => Trigger::TouchSwipe {
+                    fingers,
+                    direction: SwipeDir::ALL[dir_idx as usize % SwipeDir::ALL.len()],
+                },
+                Family::Pinch => Trigger::TouchPinch {
+                    fingers,
+                    direction: PinchDir::ALL[dir_idx as usize % PinchDir::ALL.len()],
+                },
+                Family::Rotate => Trigger::TouchRotate {
+                    fingers,
+                    direction: RotateDir::ALL[dir_idx as usize % RotateDir::ALL.len()],
+                },
+                Family::Edge => {
+                    let edge = Edge::ALL[edge_idx as usize % Edge::ALL.len()];
+                    let zone = if zone_idx == 0 {
+                        None
+                    } else {
+                        Some(EdgeZone::ALL[(zone_idx - 1) as usize % EdgeZone::ALL.len()])
+                    };
+                    Trigger::TouchEdge { edge, zone }
+                }
+            };
+
             let action_idx = action_combo.selected() as usize;
-
-            if gesture_idx >= GESTURE_OPTIONS.len() || action_idx >= ACTION_OPTIONS.len() {
-                return;
-            }
-
-            let gesture_name = GESTURE_OPTIONS[gesture_idx].1.to_string();
+            if action_idx >= ACTION_OPTIONS.len() { return }
             let action_name = ACTION_OPTIONS[action_idx].1.to_string();
 
             // Check for duplicates
-            if settings.borrow().binds.iter().any(|b| b.gesture_name == gesture_name) {
+            let key = trigger.key();
+            if settings.borrow().binds.iter().any(|b| b.trigger.key() == key) {
                 return;
             }
 
@@ -647,7 +729,7 @@ fn build_add_form(
             };
 
             let bind = TouchBindEntry {
-                gesture_name,
+                trigger,
                 action_name,
                 action_args,
                 sensitivity: None,

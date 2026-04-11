@@ -2,7 +2,9 @@ use adw::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::config::{self, TouchBindEntry, TouchpadSettings};
+use crate::config::{
+    self, SwipeDir, TouchBindEntry, TouchpadSettings, Trigger, MAX_FINGERS, MIN_FINGERS,
+};
 
 pub fn build() -> gtk::Box {
     let settings = Rc::new(RefCell::new(config::read_touchpad_settings()));
@@ -382,23 +384,8 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
 }
 
 // ---------------------------------------------------------------------------
-// Touchpad gesture presets
+// Touchpad gesture action list
 // ---------------------------------------------------------------------------
-
-const TOUCHPAD_GESTURE_OPTIONS: &[(&str, &str)] = &[
-    ("3-Finger Swipe Up", "TouchpadSwipe3Up"),
-    ("3-Finger Swipe Down", "TouchpadSwipe3Down"),
-    ("3-Finger Swipe Left", "TouchpadSwipe3Left"),
-    ("3-Finger Swipe Right", "TouchpadSwipe3Right"),
-    ("4-Finger Swipe Up", "TouchpadSwipe4Up"),
-    ("4-Finger Swipe Down", "TouchpadSwipe4Down"),
-    ("4-Finger Swipe Left", "TouchpadSwipe4Left"),
-    ("4-Finger Swipe Right", "TouchpadSwipe4Right"),
-    ("5-Finger Swipe Up", "TouchpadSwipe5Up"),
-    ("5-Finger Swipe Down", "TouchpadSwipe5Down"),
-    ("5-Finger Swipe Left", "TouchpadSwipe5Left"),
-    ("5-Finger Swipe Right", "TouchpadSwipe5Right"),
-];
 
 const TOUCHPAD_ACTION_OPTIONS: &[(&str, &str)] = &[
     ("Focus Workspace Up", "focus-workspace-up"),
@@ -422,13 +409,6 @@ const TOUCHPAD_ACTION_OPTIONS: &[(&str, &str)] = &[
     ("Spawn Command...", "spawn"),
     ("Noop (IPC only)", "noop"),
 ];
-
-fn display_gesture_name(kdl_name: &str) -> String {
-    if let Some((display, _)) = TOUCHPAD_GESTURE_OPTIONS.iter().find(|(_, k)| *k == kdl_name) {
-        return display.to_string();
-    }
-    kdl_name.to_string()
-}
 
 fn display_action_name(action_name: &str, action_args: &[String]) -> String {
     if action_name == "spawn" && !action_args.is_empty() {
@@ -489,26 +469,27 @@ fn build_bind_row(
     group: &Rc<adw::PreferencesGroup>,
     settings: &Rc<RefCell<TouchpadSettings>>,
 ) -> adw::ExpanderRow {
-    let gesture_display = display_gesture_name(&bind.gesture_name);
+    let gesture_display = bind.trigger.display_name();
     let action_display = display_action_name(&bind.action_name, &bind.action_args);
+    let key = bind.trigger.key();
 
     let row = adw::ExpanderRow::builder()
         .title(&gesture_display)
         .subtitle(&action_display)
         .build();
 
-    // Enable/disable toggle in suffix (iOS/Android style)
+    // Enable/disable toggle in suffix
     let enable_switch = gtk::Switch::builder()
         .valign(gtk::Align::Center)
         .active(bind.enabled)
         .build();
 
     {
-        let gesture_name = bind.gesture_name.clone();
+        let key = key.clone();
         let settings = settings.clone();
         enable_switch.connect_active_notify(move |switch| {
             if let Some(b) = settings.borrow_mut().binds.iter_mut()
-                .find(|b| b.gesture_name == gesture_name)
+                .find(|b| b.trigger.key() == key)
             {
                 b.enabled = switch.is_active();
             }
@@ -525,7 +506,7 @@ fn build_bind_row(
         .build();
 
     {
-        let gesture_name = bind.gesture_name.clone();
+        let key = key.clone();
         let gesture_display = gesture_display.clone();
         let row_clone = row.clone();
         let group = group.clone();
@@ -542,13 +523,13 @@ fn build_bind_row(
             dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
             dialog.set_default_response(Some("cancel"));
 
-            let gesture_name = gesture_name.clone();
+            let key = key.clone();
             let row_clone = row_clone.clone();
             let group = group.clone();
             let settings = settings.clone();
             dialog.connect_response(None, move |_, response| {
                 if response == "delete" {
-                    settings.borrow_mut().binds.retain(|b| b.gesture_name != gesture_name);
+                    settings.borrow_mut().binds.retain(|b| b.trigger.key() != key);
                     save_and_reload(&settings);
                     group.remove(&row_clone);
                 }
@@ -573,7 +554,7 @@ fn build_bind_row(
     action_combo.set_selected(current_idx);
 
     {
-        let gesture_name = bind.gesture_name.clone();
+        let key = key.clone();
         let settings = settings.clone();
         let row_ref = row.clone();
         action_combo.connect_selected_notify(move |combo| {
@@ -583,7 +564,7 @@ fn build_bind_row(
             let new_display = TOUCHPAD_ACTION_OPTIONS[idx].0;
 
             if let Some(b) = settings.borrow_mut().binds.iter_mut()
-                .find(|b| b.gesture_name == gesture_name)
+                .find(|b| b.trigger.key() == key)
             {
                 b.action_name = new_action;
                 b.action_args.clear();
@@ -606,11 +587,11 @@ fn build_bind_row(
         .build();
 
     {
-        let gesture_name = bind.gesture_name.clone();
+        let key = key.clone();
         let settings = settings.clone();
         sens_row.connect_value_notify(move |spin| {
             if let Some(b) = settings.borrow_mut().binds.iter_mut()
-                .find(|b| b.gesture_name == gesture_name)
+                .find(|b| b.trigger.key() == key)
             {
                 b.sensitivity = Some(spin.value());
             }
@@ -626,12 +607,12 @@ fn build_bind_row(
         .build();
 
     {
-        let gesture_name = bind.gesture_name.clone();
+        let key = key.clone();
         let settings = settings.clone();
         tag_row.connect_changed(move |entry| {
             let text = entry.text().to_string();
             if let Some(b) = settings.borrow_mut().binds.iter_mut()
-                .find(|b| b.gesture_name == gesture_name)
+                .find(|b| b.trigger.key() == key)
             {
                 b.tag = if text.is_empty() { None } else { Some(text) };
             }
@@ -643,6 +624,10 @@ fn build_bind_row(
     row
 }
 
+// ---------------------------------------------------------------------------
+// Add bind form — nested picker for TouchpadSwipe (fingers + direction)
+// ---------------------------------------------------------------------------
+
 fn build_add_form(
     settings: &Rc<RefCell<TouchpadSettings>>,
     binds_group: &Rc<adw::PreferencesGroup>,
@@ -651,15 +636,28 @@ fn build_add_form(
         .title("Add New Bind")
         .build();
 
-    // Gesture dropdown
-    let gesture_labels: Vec<&str> = TOUCHPAD_GESTURE_OPTIONS.iter().map(|(d, _)| *d).collect();
-    let gesture_model = gtk::StringList::new(&gesture_labels);
-    let gesture_combo = adw::ComboRow::builder()
-        .title("Gesture")
-        .model(&gesture_model)
+    // Touchpad only has one family (TouchpadSwipe), so we just pick
+    // fingers + direction directly.
+    let fingers_row = adw::SpinRow::builder()
+        .title("Fingers")
+        .subtitle("Number of fingers required (3–10)")
+        .adjustment(&gtk::Adjustment::new(
+            3.0,
+            MIN_FINGERS as f64,
+            MAX_FINGERS as f64,
+            1.0, 1.0, 0.0,
+        ))
+        .build();
+    group.add(&fingers_row);
+
+    let dir_labels = ["Up", "Down", "Left", "Right"];
+    let dir_model = gtk::StringList::new(&dir_labels);
+    let dir_combo = adw::ComboRow::builder()
+        .title("Direction")
+        .model(&dir_model)
         .selected(0)
         .build();
-    group.add(&gesture_combo);
+    group.add(&dir_combo);
 
     // Action dropdown
     let action_labels: Vec<&str> = TOUCHPAD_ACTION_OPTIONS.iter().map(|(d, _)| *d).collect();
@@ -698,24 +696,24 @@ fn build_add_form(
     {
         let settings = settings.clone();
         let binds_group = binds_group.clone();
-        let gesture_combo = gesture_combo.clone();
+        let fingers_row = fingers_row.clone();
+        let dir_combo = dir_combo.clone();
         let action_combo = action_combo.clone();
         let spawn_entry = spawn_entry.clone();
 
         add_row.connect_activated(move |_| {
-            let gesture_idx = gesture_combo.selected() as usize;
+            let fingers = fingers_row.value() as u8;
+            let dir_idx = dir_combo.selected() as usize;
+            if dir_idx >= SwipeDir::ALL.len() { return }
+            let direction = SwipeDir::ALL[dir_idx];
+            let trigger = Trigger::TouchpadSwipe { fingers, direction };
+
             let action_idx = action_combo.selected() as usize;
-
-            if gesture_idx >= TOUCHPAD_GESTURE_OPTIONS.len()
-                || action_idx >= TOUCHPAD_ACTION_OPTIONS.len()
-            {
-                return;
-            }
-
-            let gesture_name = TOUCHPAD_GESTURE_OPTIONS[gesture_idx].1.to_string();
+            if action_idx >= TOUCHPAD_ACTION_OPTIONS.len() { return }
             let action_name = TOUCHPAD_ACTION_OPTIONS[action_idx].1.to_string();
 
-            if settings.borrow().binds.iter().any(|b| b.gesture_name == gesture_name) {
+            let key = trigger.key();
+            if settings.borrow().binds.iter().any(|b| b.trigger.key() == key) {
                 return;
             }
 
@@ -728,7 +726,7 @@ fn build_add_form(
             };
 
             let bind = TouchBindEntry {
-                gesture_name,
+                trigger,
                 action_name,
                 action_args,
                 sensitivity: None,
