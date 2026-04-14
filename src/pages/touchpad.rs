@@ -445,19 +445,47 @@ fn build_gestures(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesP
         .build();
     page.add(&info);
 
+    // Tracked rows — each added row is recorded here so the search entry
+    // can filter by visibility without rebuilding the list.
+    let tracked_rows: Rc<RefCell<Vec<adw::ExpanderRow>>> = Rc::new(RefCell::new(Vec::new()));
+
+    // Search / filter entry
+    let search_group = adw::PreferencesGroup::builder().build();
+    let search_row = adw::EntryRow::builder()
+        .title("Filter Binds")
+        .build();
+    search_row.add_prefix(&gtk::Image::from_icon_name("system-search-symbolic"));
+    {
+        let tracked_rows = tracked_rows.clone();
+        search_row.connect_changed(move |entry| {
+            let query = entry.text().to_string().to_lowercase();
+            for r in tracked_rows.borrow().iter() {
+                let title = r.title().to_string().to_lowercase();
+                let subtitle = r.subtitle().to_string().to_lowercase();
+                let visible = query.is_empty()
+                    || title.contains(&query)
+                    || subtitle.contains(&query);
+                r.set_visible(visible);
+            }
+        });
+    }
+    search_group.add(&search_row);
+    page.add(&search_group);
+
     // Active binds group
     let binds_group = Rc::new(adw::PreferencesGroup::builder()
         .title("Active Binds")
         .build());
 
     // Add new bind form (at top for easy access)
-    let add_group = build_add_form(settings, &binds_group);
+    let add_group = build_add_form(settings, &binds_group, &tracked_rows);
     page.add(&add_group);
 
     let binds = settings.borrow().binds.clone();
     for bind in &binds {
-        let row = build_bind_row(bind, &binds_group, settings);
+        let row = build_bind_row(bind, &binds_group, settings, &tracked_rows);
         binds_group.add(&row);
+        tracked_rows.borrow_mut().push(row);
     }
     page.add(&*binds_group);
 
@@ -502,6 +530,7 @@ fn build_bind_row(
     bind: &TouchBindEntry,
     group: &Rc<adw::PreferencesGroup>,
     settings: &Rc<RefCell<TouchpadSettings>>,
+    tracked_rows: &Rc<RefCell<Vec<adw::ExpanderRow>>>,
 ) -> adw::ExpanderRow {
     let gesture_display = bind.trigger.display_name();
     let action_display = display_action_name(&bind.action_name, &bind.action_args);
@@ -547,6 +576,7 @@ fn build_bind_row(
         let row_clone = row.clone();
         let group = group.clone();
         let settings = settings.clone();
+        let tracked_rows = tracked_rows.clone();
         delete_btn.connect_clicked(move |btn| {
             let window = btn.root().and_downcast::<gtk::Window>();
             let key = current_key.borrow().clone();
@@ -571,12 +601,14 @@ fn build_bind_row(
             let row_clone = row_clone.clone();
             let group = group.clone();
             let settings = settings.clone();
+            let tracked_rows = tracked_rows.clone();
             dialog.connect_response(None, move |_, response| {
                 if response == "delete" {
                     let key = current_key.borrow().clone();
                     settings.borrow_mut().binds.retain(|b| b.trigger.key() != key);
                     save_and_reload(&settings);
                     group.remove(&row_clone);
+                    tracked_rows.borrow_mut().retain(|r| r != &row_clone);
                 }
             });
 
@@ -808,6 +840,7 @@ fn add_direction_row(
 fn build_add_form(
     settings: &Rc<RefCell<TouchpadSettings>>,
     binds_group: &Rc<adw::PreferencesGroup>,
+    tracked_rows: &Rc<RefCell<Vec<adw::ExpanderRow>>>,
 ) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder()
         .title("Add New Bind")
@@ -903,6 +936,7 @@ fn build_add_form(
     {
         let settings = settings.clone();
         let binds_group = binds_group.clone();
+        let tracked_rows = tracked_rows.clone();
         let family_combo = family_combo.clone();
         let fingers_row = fingers_row.clone();
         let dir_combo = dir_combo.clone();
@@ -960,8 +994,9 @@ fn build_add_form(
             settings.borrow_mut().binds.push(bind.clone());
             save_and_reload(&settings);
 
-            let row = build_bind_row(&bind, &binds_group, &settings);
+            let row = build_bind_row(&bind, &binds_group, &settings, &tracked_rows);
             binds_group.add(&row);
+            tracked_rows.borrow_mut().push(row);
 
             // Reset auxiliary fields for the next entry.
             sens_row.set_value(1.0);
