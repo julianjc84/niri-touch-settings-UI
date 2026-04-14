@@ -196,11 +196,15 @@ impl EdgeZone {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Trigger {
-    TouchSwipe    { fingers: u8, direction: SwipeDir },
-    TouchPinch    { fingers: u8, direction: PinchDir },
-    TouchRotate   { fingers: u8, direction: RotateDir },
-    TouchEdge     { edge: Edge, zone: Option<EdgeZone> },
-    TouchpadSwipe { fingers: u8, direction: SwipeDir },
+    TouchSwipe          { fingers: u8, direction: SwipeDir },
+    TouchPinch          { fingers: u8, direction: PinchDir },
+    TouchRotate         { fingers: u8, direction: RotateDir },
+    TouchEdge           { edge: Edge, zone: Option<EdgeZone> },
+    TouchTap            { fingers: u8 },
+    TouchTapHoldDrag    { fingers: u8, direction: Option<SwipeDir> },
+    TouchpadSwipe       { fingers: u8, direction: SwipeDir },
+    TouchpadTapHold     { fingers: u8 },
+    TouchpadTapHoldDrag { fingers: u8 },
 }
 
 impl Trigger {
@@ -211,7 +215,11 @@ impl Trigger {
             Self::TouchPinch { .. } => "TouchPinch",
             Self::TouchRotate { .. } => "TouchRotate",
             Self::TouchEdge { .. } => "TouchEdge",
+            Self::TouchTap { .. } => "TouchTap",
+            Self::TouchTapHoldDrag { .. } => "TouchTapHoldDrag",
             Self::TouchpadSwipe { .. } => "TouchpadSwipe",
+            Self::TouchpadTapHold { .. } => "TouchpadTapHold",
+            Self::TouchpadTapHoldDrag { .. } => "TouchpadTapHoldDrag",
         }
     }
 
@@ -232,8 +240,21 @@ impl Trigger {
                 let z = zone.map(|z| z.as_kdl(edge)).unwrap_or("full");
                 format!("TouchEdge:{}:{z}", edge.as_kdl())
             }
+            Self::TouchTap { fingers } => {
+                format!("TouchTap:{fingers}")
+            }
+            Self::TouchTapHoldDrag { fingers, direction } => {
+                let d = direction.map(|d| d.as_kdl()).unwrap_or("any");
+                format!("TouchTapHoldDrag:{fingers}:{d}")
+            }
             Self::TouchpadSwipe { fingers, direction } => {
                 format!("TouchpadSwipe:{fingers}:{}", direction.as_kdl())
+            }
+            Self::TouchpadTapHold { fingers } => {
+                format!("TouchpadTapHold:{fingers}")
+            }
+            Self::TouchpadTapHoldDrag { fingers } => {
+                format!("TouchpadTapHoldDrag:{fingers}")
             }
         }
     }
@@ -256,8 +277,23 @@ impl Trigger {
             Self::TouchEdge { edge, zone: Some(z) } => {
                 format!("Edge {} — {}", edge.display(), z.display(edge))
             }
+            Self::TouchTap { fingers } => {
+                format!("{fingers}-Finger Tap")
+            }
+            Self::TouchTapHoldDrag { fingers, direction: None } => {
+                format!("{fingers}-Finger Tap-Hold-Drag")
+            }
+            Self::TouchTapHoldDrag { fingers, direction: Some(d) } => {
+                format!("{fingers}-Finger Tap-Hold-Drag {}", d.display())
+            }
             Self::TouchpadSwipe { fingers, direction } => {
                 format!("{fingers}-Finger Swipe {}", direction.display())
+            }
+            Self::TouchpadTapHold { fingers } => {
+                format!("{fingers}-Finger Tap-Hold")
+            }
+            Self::TouchpadTapHoldDrag { fingers } => {
+                format!("{fingers}-Finger Tap-Hold-Drag")
             }
         }
     }
@@ -303,11 +339,35 @@ impl Trigger {
                 };
                 Some(Self::TouchEdge { edge, zone })
             }
+            "TouchTap" => {
+                let fingers = get_int("fingers")?;
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                Some(Self::TouchTap { fingers })
+            }
+            "TouchTapHoldDrag" => {
+                let fingers = get_int("fingers")?;
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                let direction = match get_str("direction") {
+                    Some(s) => Some(SwipeDir::parse(&s)?),
+                    None => None,
+                };
+                Some(Self::TouchTapHoldDrag { fingers, direction })
+            }
             "TouchpadSwipe" => {
                 let fingers = get_int("fingers")?;
                 if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
                 let direction = SwipeDir::parse(&get_str("direction")?)?;
                 Some(Self::TouchpadSwipe { fingers, direction })
+            }
+            "TouchpadTapHold" => {
+                let fingers = get_int("fingers")?;
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                Some(Self::TouchpadTapHold { fingers })
+            }
+            "TouchpadTapHoldDrag" => {
+                let fingers = get_int("fingers")?;
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                Some(Self::TouchpadTapHoldDrag { fingers })
             }
             _ => None,
         }
@@ -335,6 +395,17 @@ impl Trigger {
                 push_string_prop(node, "edge", edge.as_kdl());
                 if let Some(z) = zone {
                     push_string_prop(node, "zone", z.as_kdl(edge));
+                }
+            }
+            Self::TouchTap { fingers }
+            | Self::TouchpadTapHold { fingers }
+            | Self::TouchpadTapHoldDrag { fingers } => {
+                push_int_prop(node, "fingers", fingers as i128);
+            }
+            Self::TouchTapHoldDrag { fingers, direction } => {
+                push_int_prop(node, "fingers", fingers as i128);
+                if let Some(d) = direction {
+                    push_string_prop(node, "direction", d.as_kdl());
                 }
             }
         }
@@ -401,6 +472,10 @@ pub struct TouchscreenSettings {
     pub rotation_trigger_angle: f64,
     pub rotation_dominance_ratio: f64,
     pub rotation_progress_angle: f64,
+    // Tap detection
+    pub tap_wobble_threshold: f64,
+    pub tap_timeout_ms: f64,
+    pub tap_hold_trigger_delay_ms: f64,
     // IPC progress scaling
     pub swipe_progress_distance: f64,
     // Dynamic touch binds
@@ -416,7 +491,7 @@ impl Default for TouchscreenSettings {
             natural_scroll: false,
             map_to_output: None,
             swipe_trigger_distance: 100.0,
-            edge_start_distance: 30.0,
+            edge_start_distance: 12.0,
             pinch_trigger_distance: 100.0,
             pinch_dominance_ratio: 1.0,
             pinch_sensitivity: 1.0,
@@ -424,6 +499,9 @@ impl Default for TouchscreenSettings {
             rotation_trigger_angle: 20.0,
             rotation_dominance_ratio: 0.5,
             rotation_progress_angle: 90.0,
+            tap_wobble_threshold: 15.0,
+            tap_timeout_ms: 500.0,
+            tap_hold_trigger_delay_ms: 200.0,
             swipe_progress_distance: 200.0,
             binds: Vec::new(),
         }
@@ -613,6 +691,15 @@ fn parse_touchscreen_settings(content: &str) -> TouchscreenSettings {
             if let Some(v) = read_float_arg(gestures_children, "rotation-progress-angle") {
                 settings.rotation_progress_angle = v;
             }
+            if let Some(v) = read_float_arg(gestures_children, "tap-wobble-threshold") {
+                settings.tap_wobble_threshold = v;
+            }
+            if let Some(v) = read_float_arg(gestures_children, "tap-timeout-ms") {
+                settings.tap_timeout_ms = v;
+            }
+            if let Some(v) = read_float_arg(gestures_children, "tap-hold-trigger-delay-ms") {
+                settings.tap_hold_trigger_delay_ms = v;
+            }
             if let Some(v) = read_float_arg(gestures_children, "swipe-progress-distance") {
                 settings.swipe_progress_distance = v;
             }
@@ -721,6 +808,9 @@ pub fn write_touchscreen_settings(settings: &TouchscreenSettings) {
     write_float_node(gestures_children, "rotation-trigger-angle", settings.rotation_trigger_angle);
     write_float_node(gestures_children, "rotation-dominance-ratio", settings.rotation_dominance_ratio);
     write_float_node(gestures_children, "rotation-progress-angle", settings.rotation_progress_angle);
+    write_float_node(gestures_children, "tap-wobble-threshold", settings.tap_wobble_threshold);
+    write_float_node(gestures_children, "tap-timeout-ms", settings.tap_timeout_ms);
+    write_float_node(gestures_children, "tap-hold-trigger-delay-ms", settings.tap_hold_trigger_delay_ms);
     write_float_node(gestures_children, "swipe-progress-distance", settings.swipe_progress_distance);
 
     ts_children.nodes_mut().push(gestures_node);

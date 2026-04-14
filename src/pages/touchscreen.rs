@@ -60,18 +60,20 @@ const ACTION_OPTIONS: &[(&str, &str)] = &[
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Family { Swipe, Pinch, Rotate, Edge }
+enum Family { Swipe, Pinch, Rotate, Edge, Tap, TapHoldDrag }
 
 impl Family {
-    fn all_labels() -> [&'static str; 4] {
-        ["Swipe", "Pinch", "Rotate", "Edge"]
+    fn all_labels() -> [&'static str; 6] {
+        ["Swipe", "Pinch", "Rotate", "Edge", "Tap", "Tap-Hold-Drag"]
     }
     fn from_index(i: u32) -> Self {
         match i {
             0 => Self::Swipe,
             1 => Self::Pinch,
             2 => Self::Rotate,
-            _ => Self::Edge,
+            3 => Self::Edge,
+            4 => Self::Tap,
+            _ => Self::TapHoldDrag,
         }
     }
 }
@@ -232,6 +234,30 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
         |s, v| s.rotation_progress_angle = v);
 
     page.add(&rot_group);
+
+    // Tap detection
+    let tap_group = adw::PreferencesGroup::builder()
+        .title("Tap Detection")
+        .description("Tuning for tap and tap-hold-drag recognition")
+        .build();
+
+    add_threshold_row(&tap_group, settings, "Tap Wobble Threshold",
+        "Pixels per finger before a tap candidate is cancelled",
+        settings.borrow().tap_wobble_threshold, 1.0, 100.0, 0,
+        |s, v| s.tap_wobble_threshold = v);
+
+    add_threshold_row(&tap_group, settings, "Tap Timeout (ms)",
+        "Maximum ms between touch-down and all fingers lifting for a tap to fire",
+        settings.borrow().tap_timeout_ms, 50.0, 2000.0, 0,
+        |s, v| s.tap_timeout_ms = v);
+
+    add_threshold_row(&tap_group, settings, "Tap-Hold Trigger Delay (ms)",
+        "Minimum ms of stationary hold before a wobble can trigger tap-hold-drag \
+         (shorter delays make fast swipes trigger hold-drag; longer makes it require a deliberate hold)",
+        settings.borrow().tap_hold_trigger_delay_ms, 0.0, 1000.0, 0,
+        |s, v| s.tap_hold_trigger_delay_ms = v);
+
+    page.add(&tap_group);
 
     // IPC progress scaling
     let ipc_group = adw::PreferencesGroup::builder()
@@ -468,7 +494,16 @@ fn build_bind_row(
         Trigger::TouchEdge { edge, zone } => {
             add_edge_row(&row, settings, &current_key, &suppress, edge, zone);
         }
-        Trigger::TouchpadSwipe { .. } => {
+        Trigger::TouchTap { fingers } => {
+            add_fingers_row(&row, settings, &current_key, &suppress, fingers);
+        }
+        Trigger::TouchTapHoldDrag { fingers, .. } => {
+            add_fingers_row(&row, settings, &current_key, &suppress, fingers);
+            add_direction_row(&row, settings, &current_key, &suppress, bind.trigger);
+        }
+        Trigger::TouchpadSwipe { .. }
+        | Trigger::TouchpadTapHold { .. }
+        | Trigger::TouchpadTapHoldDrag { .. } => {
             // Not emitted on the touchscreen page.
         }
     }
@@ -617,6 +652,10 @@ fn add_fingers_row(
                 Trigger::TouchSwipe { direction, .. } => Trigger::TouchSwipe { fingers: new_fingers, direction },
                 Trigger::TouchPinch { direction, .. } => Trigger::TouchPinch { fingers: new_fingers, direction },
                 Trigger::TouchRotate { direction, .. } => Trigger::TouchRotate { fingers: new_fingers, direction },
+                Trigger::TouchTap { .. } => Trigger::TouchTap { fingers: new_fingers },
+                Trigger::TouchTapHoldDrag { direction, .. } => {
+                    Trigger::TouchTapHoldDrag { fingers: new_fingers, direction }
+                }
                 other => other,
             });
             if !ok {
@@ -628,6 +667,8 @@ fn add_fingers_row(
                         Trigger::TouchSwipe { fingers, .. }
                         | Trigger::TouchPinch { fingers, .. }
                         | Trigger::TouchRotate { fingers, .. } => fingers,
+                        Trigger::TouchTap { fingers } => fingers,
+                        Trigger::TouchTapHoldDrag { fingers, .. } => fingers,
                         _ => return,
                     };
                     suppress.set(true);
@@ -647,6 +688,7 @@ fn add_direction_row(
     suppress: &Rc<Cell<bool>>,
     trigger: Trigger,
 ) {
+    // TapHoldDrag uses "Any" at index 0 followed by the 4 SwipeDir options.
     let (labels, selected): (Vec<&str>, u32) = match trigger {
         Trigger::TouchSwipe { direction, .. } => (
             SwipeDir::ALL.iter().map(|d| d.display()).collect(),
@@ -660,6 +702,15 @@ fn add_direction_row(
             RotateDir::ALL.iter().map(|d| d.display()).collect(),
             RotateDir::ALL.iter().position(|d| *d == direction).unwrap_or(0) as u32,
         ),
+        Trigger::TouchTapHoldDrag { direction, .. } => {
+            let mut l = vec!["Any"];
+            l.extend(SwipeDir::ALL.iter().map(|d| d.display()));
+            let sel = match direction {
+                None => 0,
+                Some(d) => 1 + SwipeDir::ALL.iter().position(|x| *x == d).unwrap_or(0) as u32,
+            };
+            (l, sel)
+        }
         _ => return,
     };
 
@@ -692,6 +743,14 @@ fn add_direction_row(
                     fingers,
                     direction: RotateDir::ALL[idx % RotateDir::ALL.len()],
                 },
+                Trigger::TouchTapHoldDrag { fingers, .. } => {
+                    let direction = if idx == 0 {
+                        None
+                    } else {
+                        Some(SwipeDir::ALL[(idx - 1) % SwipeDir::ALL.len()])
+                    };
+                    Trigger::TouchTapHoldDrag { fingers, direction }
+                }
                 other => other,
             });
             if !ok {
@@ -709,6 +768,10 @@ fn add_direction_row(
                         Trigger::TouchRotate { direction, .. } => {
                             RotateDir::ALL.iter().position(|d| *d == direction).unwrap_or(0)
                         }
+                        Trigger::TouchTapHoldDrag { direction, .. } => match direction {
+                            None => 0,
+                            Some(d) => 1 + SwipeDir::ALL.iter().position(|x| *x == d).unwrap_or(0),
+                        },
                         _ => return,
                     } as u32;
                     suppress.set(true);
@@ -849,8 +912,8 @@ fn build_add_form(
         .title("Add New Bind")
         .build();
 
-    // Family selector (Swipe / Pinch / Rotate / Edge)
-    let family_labels: [&str; 4] = Family::all_labels();
+    // Family selector (Swipe / Pinch / Rotate / Edge / Tap / Tap-Hold-Drag)
+    let family_labels: [&str; 6] = Family::all_labels();
     let family_model = gtk::StringList::new(&family_labels);
     let family_combo = adw::ComboRow::builder()
         .title("Gesture Family")
@@ -981,6 +1044,22 @@ fn build_add_form(
                     edge_combo.set_visible(true);
                     zone_combo.set_visible(true);
                 }
+                Family::Tap => {
+                    fingers_row.set_visible(true);
+                    dir_combo.set_visible(false);
+                    edge_combo.set_visible(false);
+                    zone_combo.set_visible(false);
+                }
+                Family::TapHoldDrag => {
+                    fingers_row.set_visible(true);
+                    dir_combo.set_visible(true);
+                    dir_combo.set_model(Some(&gtk::StringList::new(&[
+                        "Any", "Up", "Down", "Left", "Right",
+                    ])));
+                    dir_combo.set_selected(0);
+                    edge_combo.set_visible(false);
+                    zone_combo.set_visible(false);
+                }
             }
         });
     }
@@ -1059,6 +1138,15 @@ fn build_add_form(
                         Some(EdgeZone::ALL[(zone_idx - 1) as usize % EdgeZone::ALL.len()])
                     };
                     Trigger::TouchEdge { edge, zone }
+                }
+                Family::Tap => Trigger::TouchTap { fingers },
+                Family::TapHoldDrag => {
+                    let direction = if dir_idx == 0 {
+                        None
+                    } else {
+                        Some(SwipeDir::ALL[(dir_idx - 1) as usize % SwipeDir::ALL.len()])
+                    };
+                    Trigger::TouchTapHoldDrag { fingers, direction }
                 }
             };
 

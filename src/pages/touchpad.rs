@@ -586,11 +586,20 @@ fn build_bind_row(
     row.add_suffix(&delete_btn);
 
     // -----------------------------------------------------------------
-    // Editable trigger rows — touchpad only has TouchpadSwipe.
+    // Editable trigger rows — touchpad: Swipe / TapHold / TapHoldDrag.
     // -----------------------------------------------------------------
-    if let Trigger::TouchpadSwipe { fingers, direction } = bind.trigger {
-        add_fingers_row(&row, settings, &current_key, &suppress, fingers);
-        add_direction_row(&row, settings, &current_key, &suppress, direction);
+    match bind.trigger {
+        Trigger::TouchpadSwipe { fingers, direction } => {
+            add_fingers_row(&row, settings, &current_key, &suppress, fingers);
+            add_direction_row(&row, settings, &current_key, &suppress, direction);
+        }
+        Trigger::TouchpadTapHold { fingers }
+        | Trigger::TouchpadTapHoldDrag { fingers } => {
+            add_fingers_row(&row, settings, &current_key, &suppress, fingers);
+        }
+        _ => {
+            // Not emitted on the touchpad page.
+        }
     }
 
     // Action dropdown
@@ -714,17 +723,27 @@ fn add_fingers_row(
                 Trigger::TouchpadSwipe { direction, .. } => {
                     Trigger::TouchpadSwipe { fingers: new_fingers, direction }
                 }
+                Trigger::TouchpadTapHold { .. } => {
+                    Trigger::TouchpadTapHold { fingers: new_fingers }
+                }
+                Trigger::TouchpadTapHoldDrag { .. } => {
+                    Trigger::TouchpadTapHoldDrag { fingers: new_fingers }
+                }
                 other => other,
             });
             if !ok {
                 let key = current_key.borrow().clone();
                 let s = settings.borrow();
                 if let Some(b) = s.binds.iter().find(|b| b.trigger.key() == key) {
-                    if let Trigger::TouchpadSwipe { fingers, .. } = b.trigger {
-                        suppress.set(true);
-                        fingers_ref.set_value(fingers as f64);
-                        suppress.set(false);
-                    }
+                    let old = match b.trigger {
+                        Trigger::TouchpadSwipe { fingers, .. }
+                        | Trigger::TouchpadTapHold { fingers }
+                        | Trigger::TouchpadTapHoldDrag { fingers } => fingers,
+                        _ => return,
+                    };
+                    suppress.set(true);
+                    fingers_ref.set_value(old as f64);
+                    suppress.set(false);
                 }
             }
         });
@@ -783,7 +802,7 @@ fn add_direction_row(
 }
 
 // ---------------------------------------------------------------------------
-// Add bind form — nested picker for TouchpadSwipe (fingers + direction)
+// Add bind form — family picker (Swipe / TapHold / TapHoldDrag)
 // ---------------------------------------------------------------------------
 
 fn build_add_form(
@@ -794,8 +813,16 @@ fn build_add_form(
         .title("Add New Bind")
         .build();
 
-    // Touchpad only has one family (TouchpadSwipe), so we just pick
-    // fingers + direction directly.
+    // Family selector: Swipe (has direction) / Tap-Hold / Tap-Hold-Drag
+    let family_labels = ["Swipe", "Tap-Hold", "Tap-Hold-Drag"];
+    let family_model = gtk::StringList::new(&family_labels);
+    let family_combo = adw::ComboRow::builder()
+        .title("Gesture Family")
+        .model(&family_model)
+        .selected(0)
+        .build();
+    group.add(&family_combo);
+
     let fingers_row = adw::SpinRow::builder()
         .title("Fingers")
         .subtitle("Number of fingers required (3–10)")
@@ -816,6 +843,14 @@ fn build_add_form(
         .selected(0)
         .build();
     group.add(&dir_combo);
+
+    // Direction row only applies to Swipe — hide for tap variants.
+    {
+        let dir_combo = dir_combo.clone();
+        family_combo.connect_selected_notify(move |combo| {
+            dir_combo.set_visible(combo.selected() == 0);
+        });
+    }
 
     // Action dropdown
     let action_labels: Vec<&str> = TOUCHPAD_ACTION_OPTIONS.iter().map(|(d, _)| *d).collect();
@@ -868,6 +903,7 @@ fn build_add_form(
     {
         let settings = settings.clone();
         let binds_group = binds_group.clone();
+        let family_combo = family_combo.clone();
         let fingers_row = fingers_row.clone();
         let dir_combo = dir_combo.clone();
         let action_combo = action_combo.clone();
@@ -877,10 +913,16 @@ fn build_add_form(
 
         add_row.connect_activated(move |_| {
             let fingers = fingers_row.value() as u8;
-            let dir_idx = dir_combo.selected() as usize;
-            if dir_idx >= SwipeDir::ALL.len() { return }
-            let direction = SwipeDir::ALL[dir_idx];
-            let trigger = Trigger::TouchpadSwipe { fingers, direction };
+            let family_idx = family_combo.selected();
+            let trigger = match family_idx {
+                0 => {
+                    let dir_idx = dir_combo.selected() as usize;
+                    if dir_idx >= SwipeDir::ALL.len() { return }
+                    Trigger::TouchpadSwipe { fingers, direction: SwipeDir::ALL[dir_idx] }
+                }
+                1 => Trigger::TouchpadTapHold { fingers },
+                _ => Trigger::TouchpadTapHoldDrag { fingers },
+            };
 
             let action_idx = action_combo.selected() as usize;
             if action_idx >= TOUCHPAD_ACTION_OPTIONS.len() { return }
