@@ -327,7 +327,16 @@ fn build_binds_page(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Prefere
     // can filter by visibility without rebuilding the list.
     let tracked_rows: Rc<RefCell<Vec<adw::ExpanderRow>>> = Rc::new(RefCell::new(Vec::new()));
 
-    // Search / filter entry
+    // Active binds group
+    let binds_group = Rc::new(adw::PreferencesGroup::builder()
+        .title("Active Binds")
+        .build());
+
+    // Add new bind form (at top for easy access)
+    let add_group = build_add_form(settings, &binds_group, &tracked_rows);
+    page.add(&add_group);
+
+    // Search / filter entry — sits just above the Active Binds list
     let search_group = adw::PreferencesGroup::builder().build();
     let search_row = adw::EntryRow::builder()
         .title("Filter Binds")
@@ -349,15 +358,6 @@ fn build_binds_page(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Prefere
     }
     search_group.add(&search_row);
     page.add(&search_group);
-
-    // Active binds group
-    let binds_group = Rc::new(adw::PreferencesGroup::builder()
-        .title("Active Binds")
-        .build());
-
-    // Add new bind form (at top for easy access)
-    let add_group = build_add_form(settings, &binds_group, &tracked_rows);
-    page.add(&add_group);
 
     populate_binds_group(&binds_group, settings, &tracked_rows);
     page.add(&*binds_group);
