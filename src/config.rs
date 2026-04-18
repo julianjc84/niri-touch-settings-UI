@@ -17,11 +17,15 @@ pub const MAX_FINGERS: u8 = 10;
 // These helpers bridge the two specs for property values.
 
 fn kdl_v1_to_v2(content: &str) -> String {
-    content.replace("=true", "=#true").replace("=false", "=#false")
+    content
+        .replace("=true", "=#true")
+        .replace("=false", "=#false")
 }
 
 fn kdl_v2_to_v1(content: &str) -> String {
-    content.replace("=#true", "=true").replace("=#false", "=false")
+    content
+        .replace("=#true", "=true")
+        .replace("=#false", "=false")
 }
 
 const INCLUDE_BLOCK: &str = "\
@@ -46,7 +50,12 @@ include \"touchpad-gestures.kdl\" optional=true\n";
 //   TouchpadSwipe fingers=3 direction="up"                { ... }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SwipeDir { Up, Down, Left, Right }
+pub enum SwipeDir {
+    Up,
+    Down,
+    Left,
+    Right,
+}
 
 impl SwipeDir {
     pub fn as_kdl(self) -> &'static str {
@@ -78,14 +87,23 @@ impl SwipeDir {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PinchDir { In, Out }
+pub enum PinchDir {
+    In,
+    Out,
+}
 
 impl PinchDir {
     pub fn as_kdl(self) -> &'static str {
-        match self { Self::In => "in", Self::Out => "out" }
+        match self {
+            Self::In => "in",
+            Self::Out => "out",
+        }
     }
     pub fn display(self) -> &'static str {
-        match self { Self::In => "In", Self::Out => "Out" }
+        match self {
+            Self::In => "In",
+            Self::Out => "Out",
+        }
     }
     pub fn parse(s: &str) -> Option<Self> {
         match s {
@@ -98,14 +116,23 @@ impl PinchDir {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RotateDir { Cw, Ccw }
+pub enum RotateDir {
+    Cw,
+    Ccw,
+}
 
 impl RotateDir {
     pub fn as_kdl(self) -> &'static str {
-        match self { Self::Cw => "cw", Self::Ccw => "ccw" }
+        match self {
+            Self::Cw => "cw",
+            Self::Ccw => "ccw",
+        }
     }
     pub fn display(self) -> &'static str {
-        match self { Self::Cw => "Clockwise", Self::Ccw => "Counter-Clockwise" }
+        match self {
+            Self::Cw => "Clockwise",
+            Self::Ccw => "Counter-Clockwise",
+        }
     }
     pub fn parse(s: &str) -> Option<Self> {
         match s {
@@ -118,7 +145,12 @@ impl RotateDir {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Edge { Left, Right, Top, Bottom }
+pub enum Edge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
 
 impl Edge {
     pub fn as_kdl(self) -> &'static str {
@@ -153,7 +185,11 @@ impl Edge {
 /// edge is split into thirds; the KDL vocabulary rotates per edge axis
 /// (Top/Bottom take left|center|right; Left/Right take top|center|bottom).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EdgeZone { Start, Center, End }
+pub enum EdgeZone {
+    Start,
+    Center,
+    End,
+}
 
 impl EdgeZone {
     /// The lowercased KDL identifier that niri expects for this
@@ -196,15 +232,39 @@ impl EdgeZone {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Trigger {
-    TouchSwipe          { fingers: u8, direction: SwipeDir },
-    TouchPinch          { fingers: u8, direction: PinchDir },
-    TouchRotate         { fingers: u8, direction: RotateDir },
-    TouchEdge           { edge: Edge, zone: Option<EdgeZone> },
-    TouchTap            { fingers: u8 },
-    TouchTapHoldDrag    { fingers: u8, direction: Option<SwipeDir> },
-    TouchpadSwipe       { fingers: u8, direction: SwipeDir },
-    TouchpadTapHold     { fingers: u8 },
-    TouchpadTapHoldDrag { fingers: u8 },
+    TouchSwipe {
+        fingers: u8,
+        direction: SwipeDir,
+    },
+    TouchPinch {
+        fingers: u8,
+        direction: PinchDir,
+    },
+    TouchRotate {
+        fingers: u8,
+        direction: RotateDir,
+    },
+    TouchEdge {
+        edge: Edge,
+        zone: Option<EdgeZone>,
+    },
+    TouchTap {
+        fingers: u8,
+    },
+    TouchTapHoldDrag {
+        fingers: u8,
+        direction: Option<SwipeDir>,
+    },
+    TouchpadSwipe {
+        fingers: u8,
+        direction: SwipeDir,
+    },
+    TouchpadTapHold {
+        fingers: u8,
+    },
+    TouchpadTapHoldDrag {
+        fingers: u8,
+    },
 }
 
 impl Trigger {
@@ -274,16 +334,25 @@ impl Trigger {
             Self::TouchEdge { edge, zone: None } => {
                 format!("Edge {} (full)", edge.display())
             }
-            Self::TouchEdge { edge, zone: Some(z) } => {
+            Self::TouchEdge {
+                edge,
+                zone: Some(z),
+            } => {
                 format!("Edge {} — {}", edge.display(), z.display(edge))
             }
             Self::TouchTap { fingers } => {
                 format!("{fingers}-Finger Tap")
             }
-            Self::TouchTapHoldDrag { fingers, direction: None } => {
+            Self::TouchTapHoldDrag {
+                fingers,
+                direction: None,
+            } => {
                 format!("{fingers}-Finger Tap-Hold-Drag")
             }
-            Self::TouchTapHoldDrag { fingers, direction: Some(d) } => {
+            Self::TouchTapHoldDrag {
+                fingers,
+                direction: Some(d),
+            } => {
                 format!("{fingers}-Finger Tap-Hold-Drag {}", d.display())
             }
             Self::TouchpadSwipe { fingers, direction } => {
@@ -306,28 +375,38 @@ impl Trigger {
         let family = name.rsplit('+').next().unwrap_or(&name);
 
         let get_int = |k: &str| -> Option<u8> {
-            node.get(k).and_then(|v| v.as_integer()).and_then(|i| u8::try_from(i).ok())
+            node.get(k)
+                .and_then(|v| v.as_integer())
+                .and_then(|i| u8::try_from(i).ok())
         };
         let get_str = |k: &str| -> Option<String> {
-            node.get(k).and_then(|v| v.as_string()).map(|s| s.to_string())
+            node.get(k)
+                .and_then(|v| v.as_string())
+                .map(|s| s.to_string())
         };
 
         match family {
             "TouchSwipe" => {
                 let fingers = get_int("fingers")?;
-                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) {
+                    return None;
+                }
                 let direction = SwipeDir::parse(&get_str("direction")?)?;
                 Some(Self::TouchSwipe { fingers, direction })
             }
             "TouchPinch" => {
                 let fingers = get_int("fingers")?;
-                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) {
+                    return None;
+                }
                 let direction = PinchDir::parse(&get_str("direction")?)?;
                 Some(Self::TouchPinch { fingers, direction })
             }
             "TouchRotate" => {
                 let fingers = get_int("fingers")?;
-                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) {
+                    return None;
+                }
                 let direction = RotateDir::parse(&get_str("direction")?)?;
                 Some(Self::TouchRotate { fingers, direction })
             }
@@ -341,12 +420,16 @@ impl Trigger {
             }
             "TouchTap" => {
                 let fingers = get_int("fingers")?;
-                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) {
+                    return None;
+                }
                 Some(Self::TouchTap { fingers })
             }
             "TouchTapHoldDrag" => {
                 let fingers = get_int("fingers")?;
-                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) {
+                    return None;
+                }
                 let direction = match get_str("direction") {
                     Some(s) => Some(SwipeDir::parse(&s)?),
                     None => None,
@@ -355,18 +438,24 @@ impl Trigger {
             }
             "TouchpadSwipe" => {
                 let fingers = get_int("fingers")?;
-                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) {
+                    return None;
+                }
                 let direction = SwipeDir::parse(&get_str("direction")?)?;
                 Some(Self::TouchpadSwipe { fingers, direction })
             }
             "TouchpadTapHold" => {
                 let fingers = get_int("fingers")?;
-                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) {
+                    return None;
+                }
                 Some(Self::TouchpadTapHold { fingers })
             }
             "TouchpadTapHoldDrag" => {
                 let fingers = get_int("fingers")?;
-                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) { return None }
+                if !(MIN_FINGERS..=MAX_FINGERS).contains(&fingers) {
+                    return None;
+                }
                 Some(Self::TouchpadTapHoldDrag { fingers })
             }
             _ => None,
@@ -615,7 +704,8 @@ pub fn ensure_includes() {
     let main_path = main_config_path();
     let content = fs::read_to_string(&main_path).unwrap_or_default();
 
-    let has_touchscreen = content.contains("touchscreen-gestures.kdl") || content.contains("touch-gestures.kdl");
+    let has_touchscreen =
+        content.contains("touchscreen-gestures.kdl") || content.contains("touch-gestures.kdl");
     let has_touchpad = content.contains("touchpad-gestures.kdl");
 
     if has_touchscreen && has_touchpad {
@@ -646,10 +736,18 @@ fn parse_touchscreen_settings(content: &str) -> TouchscreenSettings {
     let doc: KdlDocument = v2_content.parse().unwrap_or_default();
     let mut settings = TouchscreenSettings::default();
 
-    let Some(input_node) = doc.get("input") else { return settings };
-    let Some(input_children) = input_node.children() else { return settings };
-    let Some(ts_node) = input_children.get("touchscreen") else { return settings };
-    let Some(ts_children) = ts_node.children() else { return settings };
+    let Some(input_node) = doc.get("input") else {
+        return settings;
+    };
+    let Some(input_children) = input_node.children() else {
+        return settings;
+    };
+    let Some(ts_node) = input_children.get("touchscreen") else {
+        return settings;
+    };
+    let Some(ts_children) = ts_node.children() else {
+        return settings;
+    };
 
     settings.off = ts_children.get("off").is_some();
     settings.natural_scroll = ts_children.get("natural-scroll").is_some();
@@ -723,12 +821,14 @@ fn read_gesture_binds(binds_doc: &KdlDocument) -> Vec<TouchBindEntry> {
     let mut binds = Vec::new();
 
     for node in binds_doc.nodes() {
-        let Some(trigger) = Trigger::parse_node(node) else { continue };
+        let Some(trigger) = Trigger::parse_node(node) else {
+            continue;
+        };
 
         // Read properties: sensitivity, natural-scroll, tag
-        let sensitivity = node.get("sensitivity").and_then(|v| {
-            v.as_float().or_else(|| v.as_integer().map(|i| i as f64))
-        });
+        let sensitivity = node
+            .get("sensitivity")
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)));
         let natural_scroll = node
             .get("natural-scroll")
             .and_then(|v| v.as_bool())
@@ -799,19 +899,67 @@ pub fn write_touchscreen_settings(settings: &TouchscreenSettings) {
     let gestures_children = gestures_node.ensure_children();
 
     // Classifier commit gates + rotation detection + IPC scaling
-    write_float_node(gestures_children, "swipe-trigger-distance", settings.swipe_trigger_distance);
-    write_float_node(gestures_children, "edge-start-distance", settings.edge_start_distance);
-    write_float_node(gestures_children, "pinch-trigger-distance", settings.pinch_trigger_distance);
-    write_float_node(gestures_children, "pinch-dominance-ratio", settings.pinch_dominance_ratio);
-    write_float_node(gestures_children, "pinch-sensitivity", settings.pinch_sensitivity);
-    write_float_node(gestures_children, "swipe-multi-finger-scale", settings.swipe_multi_finger_scale);
-    write_float_node(gestures_children, "rotation-trigger-angle", settings.rotation_trigger_angle);
-    write_float_node(gestures_children, "rotation-dominance-ratio", settings.rotation_dominance_ratio);
-    write_float_node(gestures_children, "rotation-progress-angle", settings.rotation_progress_angle);
-    write_float_node(gestures_children, "tap-wobble-threshold", settings.tap_wobble_threshold);
+    write_float_node(
+        gestures_children,
+        "swipe-trigger-distance",
+        settings.swipe_trigger_distance,
+    );
+    write_float_node(
+        gestures_children,
+        "edge-start-distance",
+        settings.edge_start_distance,
+    );
+    write_float_node(
+        gestures_children,
+        "pinch-trigger-distance",
+        settings.pinch_trigger_distance,
+    );
+    write_float_node(
+        gestures_children,
+        "pinch-dominance-ratio",
+        settings.pinch_dominance_ratio,
+    );
+    write_float_node(
+        gestures_children,
+        "pinch-sensitivity",
+        settings.pinch_sensitivity,
+    );
+    write_float_node(
+        gestures_children,
+        "swipe-multi-finger-scale",
+        settings.swipe_multi_finger_scale,
+    );
+    write_float_node(
+        gestures_children,
+        "rotation-trigger-angle",
+        settings.rotation_trigger_angle,
+    );
+    write_float_node(
+        gestures_children,
+        "rotation-dominance-ratio",
+        settings.rotation_dominance_ratio,
+    );
+    write_float_node(
+        gestures_children,
+        "rotation-progress-angle",
+        settings.rotation_progress_angle,
+    );
+    write_float_node(
+        gestures_children,
+        "tap-wobble-threshold",
+        settings.tap_wobble_threshold,
+    );
     write_float_node(gestures_children, "tap-timeout-ms", settings.tap_timeout_ms);
-    write_float_node(gestures_children, "tap-hold-trigger-delay-ms", settings.tap_hold_trigger_delay_ms);
-    write_float_node(gestures_children, "swipe-progress-distance", settings.swipe_progress_distance);
+    write_float_node(
+        gestures_children,
+        "tap-hold-trigger-delay-ms",
+        settings.tap_hold_trigger_delay_ms,
+    );
+    write_float_node(
+        gestures_children,
+        "swipe-progress-distance",
+        settings.swipe_progress_distance,
+    );
 
     ts_children.nodes_mut().push(gestures_node);
     input_children.nodes_mut().push(ts_node);
@@ -896,10 +1044,18 @@ fn parse_touchpad_settings(content: &str) -> TouchpadSettings {
     let doc: KdlDocument = content.parse().unwrap_or_default();
     let mut settings = TouchpadSettings::default();
 
-    let Some(input_node) = doc.get("input") else { return settings };
-    let Some(input_children) = input_node.children() else { return settings };
-    let Some(tp_node) = input_children.get("touchpad") else { return settings };
-    let Some(tp_children) = tp_node.children() else { return settings };
+    let Some(input_node) = doc.get("input") else {
+        return settings;
+    };
+    let Some(input_children) = input_node.children() else {
+        return settings;
+    };
+    let Some(tp_node) = input_children.get("touchpad") else {
+        return settings;
+    };
+    let Some(tp_children) = tp_node.children() else {
+        return settings;
+    };
 
     // Device settings
     settings.off = tp_children.get("off").is_some();
@@ -958,17 +1114,29 @@ pub fn write_touchpad_settings(settings: &TouchpadSettings) {
     let tp_children = tp_node.ensure_children();
 
     // Device settings -- bool flags
-    if settings.off { tp_children.nodes_mut().push(KdlNode::new("off")); }
-    if settings.tap { tp_children.nodes_mut().push(KdlNode::new("tap")); }
-    if settings.dwt { tp_children.nodes_mut().push(KdlNode::new("dwt")); }
-    if settings.dwtp { tp_children.nodes_mut().push(KdlNode::new("dwtp")); }
+    if settings.off {
+        tp_children.nodes_mut().push(KdlNode::new("off"));
+    }
+    if settings.tap {
+        tp_children.nodes_mut().push(KdlNode::new("tap"));
+    }
+    if settings.dwt {
+        tp_children.nodes_mut().push(KdlNode::new("dwt"));
+    }
+    if settings.dwtp {
+        tp_children.nodes_mut().push(KdlNode::new("dwtp"));
+    }
     if let Some(drag) = settings.drag {
         let mut node = KdlNode::new("drag");
         node.push(kdl::KdlEntry::new(KdlValue::Bool(drag)));
         tp_children.nodes_mut().push(node);
     }
-    if settings.drag_lock { tp_children.nodes_mut().push(KdlNode::new("drag-lock")); }
-    if settings.natural_scroll { tp_children.nodes_mut().push(KdlNode::new("natural-scroll")); }
+    if settings.drag_lock {
+        tp_children.nodes_mut().push(KdlNode::new("drag-lock"));
+    }
+    if settings.natural_scroll {
+        tp_children.nodes_mut().push(KdlNode::new("natural-scroll"));
+    }
     if let Some(ref method) = settings.click_method {
         write_string_node(tp_children, "click-method", method);
     }
@@ -986,13 +1154,27 @@ pub fn write_touchpad_settings(settings: &TouchpadSettings) {
         node.push(kdl::KdlEntry::new(KdlValue::Integer(button as i128)));
         tp_children.nodes_mut().push(node);
     }
-    if settings.scroll_button_lock { tp_children.nodes_mut().push(KdlNode::new("scroll-button-lock")); }
+    if settings.scroll_button_lock {
+        tp_children
+            .nodes_mut()
+            .push(KdlNode::new("scroll-button-lock"));
+    }
     if let Some(ref map) = settings.tap_button_map {
         write_string_node(tp_children, "tap-button-map", map);
     }
-    if settings.left_handed { tp_children.nodes_mut().push(KdlNode::new("left-handed")); }
-    if settings.disabled_on_external_mouse { tp_children.nodes_mut().push(KdlNode::new("disabled-on-external-mouse")); }
-    if settings.middle_emulation { tp_children.nodes_mut().push(KdlNode::new("middle-emulation")); }
+    if settings.left_handed {
+        tp_children.nodes_mut().push(KdlNode::new("left-handed"));
+    }
+    if settings.disabled_on_external_mouse {
+        tp_children
+            .nodes_mut()
+            .push(KdlNode::new("disabled-on-external-mouse"));
+    }
+    if settings.middle_emulation {
+        tp_children
+            .nodes_mut()
+            .push(KdlNode::new("middle-emulation"));
+    }
     if let Some(factor) = settings.scroll_factor {
         write_float_node(tp_children, "scroll-factor", factor);
     }
@@ -1000,8 +1182,16 @@ pub fn write_touchpad_settings(settings: &TouchpadSettings) {
     // Gesture settings
     let mut gestures_node = KdlNode::new("gestures");
     let gestures_children = gestures_node.ensure_children();
-    write_float_node(gestures_children, "swipe-trigger-distance", settings.swipe_trigger_distance);
-    write_float_node(gestures_children, "swipe-progress-distance", settings.swipe_progress_distance);
+    write_float_node(
+        gestures_children,
+        "swipe-trigger-distance",
+        settings.swipe_trigger_distance,
+    );
+    write_float_node(
+        gestures_children,
+        "swipe-progress-distance",
+        settings.swipe_progress_distance,
+    );
 
     tp_children.nodes_mut().push(gestures_node);
     input_children.nodes_mut().push(tp_node);

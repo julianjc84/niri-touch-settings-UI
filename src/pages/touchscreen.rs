@@ -34,9 +34,15 @@ const ACTION_OPTIONS: &[(&str, &str)] = &[
     ("Screenshot Screen", "screenshot-screen"),
     ("Screenshot Window", "screenshot-window"),
     // Workspace
-    ("Move Window to Workspace Down", "move-window-to-workspace-down"),
+    (
+        "Move Window to Workspace Down",
+        "move-window-to-workspace-down",
+    ),
     ("Move Window to Workspace Up", "move-window-to-workspace-up"),
-    ("Move Column to Workspace Down", "move-column-to-workspace-down"),
+    (
+        "Move Column to Workspace Down",
+        "move-column-to-workspace-down",
+    ),
     ("Move Column to Workspace Up", "move-column-to-workspace-up"),
     // Monitor
     ("Focus Monitor Left", "focus-monitor-left"),
@@ -60,7 +66,14 @@ const ACTION_OPTIONS: &[(&str, &str)] = &[
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Family { Swipe, Pinch, Rotate, Edge, Tap, TapHoldDrag }
+enum Family {
+    Swipe,
+    Pinch,
+    Rotate,
+    Edge,
+    Tap,
+    TapHoldDrag,
+}
 
 impl Family {
     fn all_labels() -> [&'static str; 6] {
@@ -172,20 +185,48 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
         .description("Fine-tune how gestures are detected")
         .build();
 
-    add_threshold_row(&thresh_group, settings, "Swipe Trigger Distance",
-        "Pixels of centroid movement before a swipe commits",
-        settings.borrow().swipe_trigger_distance, 4.0, 500.0, 0,
-        |s, v| s.swipe_trigger_distance = v);
+    add_threshold_row(
+        &thresh_group,
+        settings,
+        ThresholdRow {
+            title: "Swipe Trigger Distance",
+            subtitle: "Pixels of centroid movement before a swipe commits",
+            value: settings.borrow().swipe_trigger_distance,
+            min: 4.0,
+            max: 500.0,
+            digits: 0,
+            setter: |s, v| s.swipe_trigger_distance = v,
+        },
+    );
 
-    add_threshold_row(&thresh_group, settings, "Edge Start Distance",
-        "Width of the screen-edge start zone (px)",
-        settings.borrow().edge_start_distance, 5.0, 200.0, 0,
-        |s, v| s.edge_start_distance = v);
+    add_threshold_row(
+        &thresh_group,
+        settings,
+        ThresholdRow {
+            title: "Edge Start Distance",
+            subtitle: "Width of the screen-edge start zone (px)",
+            value: settings.borrow().edge_start_distance,
+            min: 5.0,
+            max: 200.0,
+            digits: 0,
+            setter: |s, v| s.edge_start_distance = v,
+        },
+    );
 
-    add_threshold_row(&thresh_group, settings, "Swipe Multi-Finger Scale",
-        "Extra swipe threshold per finger above 3 (higher = harder with more fingers)",
-        settings.borrow().swipe_multi_finger_scale, 1.0, 5.0, 1,
-        |s, v| s.swipe_multi_finger_scale = v);
+    add_threshold_row(
+        &thresh_group,
+        settings,
+        ThresholdRow {
+            title: "Swipe Multi-Finger Scale",
+            subtitle:
+                "Extra swipe threshold per finger above 3 (higher = harder with more fingers)",
+            value: settings.borrow().swipe_multi_finger_scale,
+            min: 1.0,
+            max: 5.0,
+            digits: 1,
+            setter: |s, v| s.swipe_multi_finger_scale = v,
+        },
+    );
 
     page.add(&thresh_group);
 
@@ -195,20 +236,47 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
         .description("Tuning for pinch gesture recognition")
         .build();
 
-    add_threshold_row(&pinch_group, settings, "Pinch Trigger Distance",
-        "Minimum spread change (px) before a pinch commits",
-        settings.borrow().pinch_trigger_distance, 5.0, 500.0, 0,
-        |s, v| s.pinch_trigger_distance = v);
+    add_threshold_row(
+        &pinch_group,
+        settings,
+        ThresholdRow {
+            title: "Pinch Trigger Distance",
+            subtitle: "Minimum spread change (px) before a pinch commits",
+            value: settings.borrow().pinch_trigger_distance,
+            min: 5.0,
+            max: 500.0,
+            digits: 0,
+            setter: |s, v| s.pinch_trigger_distance = v,
+        },
+    );
 
-    add_threshold_row(&pinch_group, settings, "Pinch Dominance Ratio",
-        "Spread must exceed swipe distance by this factor (higher = stricter pinch)",
-        settings.borrow().pinch_dominance_ratio, 0.1, 5.0, 1,
-        |s, v| s.pinch_dominance_ratio = v);
+    add_threshold_row(
+        &pinch_group,
+        settings,
+        ThresholdRow {
+            title: "Pinch Dominance Ratio",
+            subtitle: "Spread must exceed swipe distance by this factor (higher = stricter pinch)",
+            value: settings.borrow().pinch_dominance_ratio,
+            min: 0.1,
+            max: 5.0,
+            digits: 1,
+            setter: |s, v| s.pinch_dominance_ratio = v,
+        },
+    );
 
-    add_threshold_row(&pinch_group, settings, "Pinch Sensitivity",
-        "Multiplier for pinch gesture deltas",
-        settings.borrow().pinch_sensitivity, 0.01, 5.0, 2,
-        |s, v| s.pinch_sensitivity = v);
+    add_threshold_row(
+        &pinch_group,
+        settings,
+        ThresholdRow {
+            title: "Pinch Sensitivity",
+            subtitle: "Multiplier for pinch gesture deltas",
+            value: settings.borrow().pinch_sensitivity,
+            min: 0.01,
+            max: 5.0,
+            digits: 2,
+            setter: |s, v| s.pinch_sensitivity = v,
+        },
+    );
 
     page.add(&pinch_group);
 
@@ -218,20 +286,48 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
         .description("Tuning for rotation gesture recognition")
         .build();
 
-    add_threshold_row(&rot_group, settings, "Rotation Trigger Angle",
-        "Minimum rotation (degrees) before a rotate commits",
-        settings.borrow().rotation_trigger_angle, 1.0, 180.0, 0,
-        |s, v| s.rotation_trigger_angle = v);
+    add_threshold_row(
+        &rot_group,
+        settings,
+        ThresholdRow {
+            title: "Rotation Trigger Angle",
+            subtitle: "Minimum rotation (degrees) before a rotate commits",
+            value: settings.borrow().rotation_trigger_angle,
+            min: 1.0,
+            max: 180.0,
+            digits: 0,
+            setter: |s, v| s.rotation_trigger_angle = v,
+        },
+    );
 
-    add_threshold_row(&rot_group, settings, "Rotation Dominance Ratio",
-        "Rotation arc must exceed swipe+spread by this factor (higher = stricter rotate)",
-        settings.borrow().rotation_dominance_ratio, 0.1, 5.0, 1,
-        |s, v| s.rotation_dominance_ratio = v);
+    add_threshold_row(
+        &rot_group,
+        settings,
+        ThresholdRow {
+            title: "Rotation Dominance Ratio",
+            subtitle:
+                "Rotation arc must exceed swipe+spread by this factor (higher = stricter rotate)",
+            value: settings.borrow().rotation_dominance_ratio,
+            min: 0.1,
+            max: 5.0,
+            digits: 1,
+            setter: |s, v| s.rotation_dominance_ratio = v,
+        },
+    );
 
-    add_threshold_row(&rot_group, settings, "Rotation Progress Angle",
-        "Degrees of rotation for IPC progress to reach 1.0",
-        settings.borrow().rotation_progress_angle, 10.0, 360.0, 0,
-        |s, v| s.rotation_progress_angle = v);
+    add_threshold_row(
+        &rot_group,
+        settings,
+        ThresholdRow {
+            title: "Rotation Progress Angle",
+            subtitle: "Degrees of rotation for IPC progress to reach 1.0",
+            value: settings.borrow().rotation_progress_angle,
+            min: 10.0,
+            max: 360.0,
+            digits: 0,
+            setter: |s, v| s.rotation_progress_angle = v,
+        },
+    );
 
     page.add(&rot_group);
 
@@ -241,69 +337,123 @@ fn build_general(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Preference
         .description("Tuning for tap and tap-hold-drag recognition")
         .build();
 
-    add_threshold_row(&tap_group, settings, "Tap Wobble Threshold",
-        "Pixels per finger before a tap candidate is cancelled",
-        settings.borrow().tap_wobble_threshold, 1.0, 100.0, 0,
-        |s, v| s.tap_wobble_threshold = v);
+    add_threshold_row(
+        &tap_group,
+        settings,
+        ThresholdRow {
+            title: "Tap Wobble Threshold",
+            subtitle: "Pixels per finger before a tap candidate is cancelled",
+            value: settings.borrow().tap_wobble_threshold,
+            min: 1.0,
+            max: 100.0,
+            digits: 0,
+            setter: |s, v| s.tap_wobble_threshold = v,
+        },
+    );
 
-    add_threshold_row(&tap_group, settings, "Tap Timeout (ms)",
-        "Maximum ms between touch-down and all fingers lifting for a tap to fire",
-        settings.borrow().tap_timeout_ms, 50.0, 2000.0, 0,
-        |s, v| s.tap_timeout_ms = v);
+    add_threshold_row(
+        &tap_group,
+        settings,
+        ThresholdRow {
+            title: "Tap Timeout (ms)",
+            subtitle: "Maximum ms between touch-down and all fingers lifting for a tap to fire",
+            value: settings.borrow().tap_timeout_ms,
+            min: 50.0,
+            max: 2000.0,
+            digits: 0,
+            setter: |s, v| s.tap_timeout_ms = v,
+        },
+    );
 
-    add_threshold_row(&tap_group, settings, "Tap-Hold Trigger Delay (ms)",
-        "Minimum ms of stationary hold before a wobble can trigger tap-hold-drag \
-         (shorter delays make fast swipes trigger hold-drag; longer makes it require a deliberate hold)",
-        settings.borrow().tap_hold_trigger_delay_ms, 0.0, 1000.0, 0,
-        |s, v| s.tap_hold_trigger_delay_ms = v);
+    add_threshold_row(
+        &tap_group,
+        settings,
+        ThresholdRow {
+            title: "Tap-Hold Trigger Delay (ms)",
+            subtitle: "Minimum ms of stationary hold before a wobble can trigger tap-hold-drag \
+             (shorter delays make fast swipes trigger hold-drag; longer makes it require a deliberate hold)",
+            value: settings.borrow().tap_hold_trigger_delay_ms,
+            min: 0.0,
+            max: 1000.0,
+            digits: 0,
+            setter: |s, v| s.tap_hold_trigger_delay_ms = v,
+        },
+    );
 
     page.add(&tap_group);
 
     // IPC progress scaling
     let ipc_group = adw::PreferencesGroup::builder()
         .title("IPC Progress")
-        .description("Controls progress scaling for external tools (screen pixels).\n\
+        .description(
+            "Controls progress scaling for external tools (screen pixels).\n\
              Noop gestures: progress directly drives the external app (1:1 sync).\n\
              Compositor actions (workspace switch, etc): progress is informational only — \
-             niri uses its own internal thresholds to decide when to commit.")
+             niri uses its own internal thresholds to decide when to commit.",
+        )
         .build();
 
-    add_threshold_row(&ipc_group, settings, "Swipe Progress Distance",
-        "Screen pixels of swipe movement for IPC progress to reach 1.0",
-        settings.borrow().swipe_progress_distance, 50.0, 1000.0, 0,
-        |s, v| s.swipe_progress_distance = v);
+    add_threshold_row(
+        &ipc_group,
+        settings,
+        ThresholdRow {
+            title: "Swipe Progress Distance",
+            subtitle: "Screen pixels of swipe movement for IPC progress to reach 1.0",
+            value: settings.borrow().swipe_progress_distance,
+            min: 50.0,
+            max: 1000.0,
+            digits: 0,
+            setter: |s, v| s.swipe_progress_distance = v,
+        },
+    );
 
     page.add(&ipc_group);
 
     page
 }
 
-fn add_threshold_row(
-    group: &adw::PreferencesGroup,
-    settings: &Rc<RefCell<TouchscreenSettings>>,
-    title: &str,
-    subtitle: &str,
+struct ThresholdRow<'a> {
+    title: &'a str,
+    subtitle: &'a str,
     value: f64,
     min: f64,
     max: f64,
     digits: u32,
     setter: fn(&mut TouchscreenSettings, f64),
+}
+
+fn add_threshold_row(
+    group: &adw::PreferencesGroup,
+    settings: &Rc<RefCell<TouchscreenSettings>>,
+    row: ThresholdRow<'_>,
 ) {
-    let step = if digits == 0 { 1.0 } else { 0.1_f64.powi(digits as i32) };
-    let row = adw::SpinRow::builder()
-        .title(title)
-        .subtitle(subtitle)
-        .adjustment(&gtk::Adjustment::new(value, min, max, step, step * 10.0, 0.0))
-        .digits(digits)
+    let step = if row.digits == 0 {
+        1.0
+    } else {
+        0.1_f64.powi(row.digits as i32)
+    };
+    let spin_row = adw::SpinRow::builder()
+        .title(row.title)
+        .subtitle(row.subtitle)
+        .adjustment(&gtk::Adjustment::new(
+            row.value,
+            row.min,
+            row.max,
+            step,
+            step * 10.0,
+            0.0,
+        ))
+        .digits(row.digits)
         .build();
 
+    let setter = row.setter;
     let settings = settings.clone();
-    row.connect_value_notify(move |row| {
-        setter(&mut settings.borrow_mut(), row.value());
+    spin_row.connect_value_notify(move |spin_row| {
+        setter(&mut settings.borrow_mut(), spin_row.value());
         save_and_reload(&settings.borrow());
     });
 
-    group.add(&row);
+    group.add(&spin_row);
 }
 
 // ---------------------------------------------------------------------------
@@ -318,7 +468,7 @@ fn build_binds_page(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Prefere
         .description(
             "Writes to touchscreen-gestures.kdl → merges into binds {}\n\
              Continuous actions (workspace switch, column scroll, overview) \
-             track your finger. All others fire once."
+             track your finger. All others fire once.",
         )
         .build();
     page.add(&info);
@@ -328,9 +478,11 @@ fn build_binds_page(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Prefere
     let tracked_rows: Rc<RefCell<Vec<adw::ExpanderRow>>> = Rc::new(RefCell::new(Vec::new()));
 
     // Active binds group
-    let binds_group = Rc::new(adw::PreferencesGroup::builder()
-        .title("Active Binds")
-        .build());
+    let binds_group = Rc::new(
+        adw::PreferencesGroup::builder()
+            .title("Active Binds")
+            .build(),
+    );
 
     // Add new bind form (at top for easy access)
     let add_group = build_add_form(settings, &binds_group, &tracked_rows);
@@ -338,9 +490,7 @@ fn build_binds_page(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Prefere
 
     // Search / filter entry — sits just above the Active Binds list
     let search_group = adw::PreferencesGroup::builder().build();
-    let search_row = adw::EntryRow::builder()
-        .title("Filter Binds")
-        .build();
+    let search_row = adw::EntryRow::builder().title("Filter Binds").build();
     search_row.add_prefix(&gtk::Image::from_icon_name("system-search-symbolic"));
     {
         let tracked_rows = tracked_rows.clone();
@@ -349,9 +499,8 @@ fn build_binds_page(settings: &Rc<RefCell<TouchscreenSettings>>) -> adw::Prefere
             for r in tracked_rows.borrow().iter() {
                 let title = r.title().to_string().to_lowercase();
                 let subtitle = r.subtitle().to_string().to_lowercase();
-                let visible = query.is_empty()
-                    || title.contains(&query)
-                    || subtitle.contains(&query);
+                let visible =
+                    query.is_empty() || title.contains(&query) || subtitle.contains(&query);
                 r.set_visible(visible);
             }
         });
@@ -409,7 +558,11 @@ where
         if new_key == key {
             return true; // No-op (same shape)
         }
-        if s.binds.iter().enumerate().any(|(i, b)| i != idx && b.trigger.key() == new_key) {
+        if s.binds
+            .iter()
+            .enumerate()
+            .any(|(i, b)| i != idx && b.trigger.key() == new_key)
+        {
             return false; // Collision
         }
         s.binds[idx].trigger = new_trigger;
@@ -450,7 +603,10 @@ fn build_bind_row(
         let current_key = current_key.clone();
         enable_switch.connect_active_notify(move |switch| {
             let key = current_key.borrow().clone();
-            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+            if let Some(b) = settings
+                .borrow_mut()
+                .binds
+                .iter_mut()
                 .find(|b| b.trigger.key() == key)
             {
                 b.enabled = switch.is_active();
@@ -502,7 +658,10 @@ fn build_bind_row(
             dialog.connect_response(None, move |_, response| {
                 if response == "delete" {
                     let key = current_key.borrow().clone();
-                    settings.borrow_mut().binds.retain(|b| b.trigger.key() != key);
+                    settings
+                        .borrow_mut()
+                        .binds
+                        .retain(|b| b.trigger.key() != key);
                     save_and_reload(&settings.borrow());
                     group.remove(&row_clone);
                     tracked_rows.borrow_mut().retain(|r| r != &row_clone);
@@ -518,9 +677,18 @@ fn build_bind_row(
     // Editable trigger rows — shape depends on family.
     // -----------------------------------------------------------------
     match bind.trigger {
-        Trigger::TouchSwipe { fingers, direction: _ }
-        | Trigger::TouchPinch { fingers, direction: _ }
-        | Trigger::TouchRotate { fingers, direction: _ } => {
+        Trigger::TouchSwipe {
+            fingers,
+            direction: _,
+        }
+        | Trigger::TouchPinch {
+            fingers,
+            direction: _,
+        }
+        | Trigger::TouchRotate {
+            fingers,
+            direction: _,
+        } => {
             add_fingers_row(&row, settings, &current_key, &suppress, fingers);
             add_direction_row(&row, settings, &current_key, &suppress, bind.trigger);
         }
@@ -550,7 +718,8 @@ fn build_bind_row(
         .build();
 
     // Set current selection
-    let current_idx = ACTION_OPTIONS.iter()
+    let current_idx = ACTION_OPTIONS
+        .iter()
         .position(|(_, k)| *k == bind.action_name)
         .unwrap_or(0) as u32;
     action_combo.set_selected(current_idx);
@@ -561,11 +730,16 @@ fn build_bind_row(
         let row_ref = row.clone();
         action_combo.connect_selected_notify(move |combo| {
             let idx = combo.selected() as usize;
-            if idx >= ACTION_OPTIONS.len() { return; }
+            if idx >= ACTION_OPTIONS.len() {
+                return;
+            }
             let new_action = ACTION_OPTIONS[idx].1.to_string();
             let new_display = ACTION_OPTIONS[idx].0;
             let key = current_key.borrow().clone();
-            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+            if let Some(b) = settings
+                .borrow_mut()
+                .binds
+                .iter_mut()
                 .find(|b| b.trigger.key() == key)
             {
                 b.action_name = new_action;
@@ -583,7 +757,11 @@ fn build_bind_row(
         .subtitle("Speed multiplier (continuous actions)")
         .adjustment(&gtk::Adjustment::new(
             bind.sensitivity.unwrap_or(1.0),
-            0.1, 5.0, 0.1, 0.5, 0.0,
+            0.1,
+            5.0,
+            0.1,
+            0.5,
+            0.0,
         ))
         .digits(1)
         .build();
@@ -593,7 +771,10 @@ fn build_bind_row(
         let settings = settings.clone();
         sens_row.connect_value_notify(move |spin| {
             let key = current_key.borrow().clone();
-            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+            if let Some(b) = settings
+                .borrow_mut()
+                .binds
+                .iter_mut()
                 .find(|b| b.trigger.key() == key)
             {
                 b.sensitivity = Some(spin.value());
@@ -615,7 +796,10 @@ fn build_bind_row(
         let settings = settings.clone();
         natural_row.connect_active_notify(move |switch| {
             let key = current_key.borrow().clone();
-            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+            if let Some(b) = settings
+                .borrow_mut()
+                .binds
+                .iter_mut()
                 .find(|b| b.trigger.key() == key)
             {
                 b.natural_scroll = switch.is_active();
@@ -637,7 +821,10 @@ fn build_bind_row(
         tag_row.connect_changed(move |entry| {
             let text = entry.text().to_string();
             let key = current_key.borrow().clone();
-            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+            if let Some(b) = settings
+                .borrow_mut()
+                .binds
+                .iter_mut()
                 .find(|b| b.trigger.key() == key)
             {
                 b.tag = if text.is_empty() { None } else { Some(text) };
@@ -668,7 +855,9 @@ fn add_fingers_row(
             initial as f64,
             MIN_FINGERS as f64,
             MAX_FINGERS as f64,
-            1.0, 1.0, 0.0,
+            1.0,
+            1.0,
+            0.0,
         ))
         .build();
 
@@ -679,16 +868,30 @@ fn add_fingers_row(
         let row_ref = row.clone();
         let fingers_ref = fingers_row.clone();
         fingers_row.connect_value_notify(move |spin| {
-            if suppress.get() { return; }
+            if suppress.get() {
+                return;
+            }
             let new_fingers = spin.value() as u8;
             let ok = try_update_trigger(&settings, &current_key, &row_ref, |t| match t {
-                Trigger::TouchSwipe { direction, .. } => Trigger::TouchSwipe { fingers: new_fingers, direction },
-                Trigger::TouchPinch { direction, .. } => Trigger::TouchPinch { fingers: new_fingers, direction },
-                Trigger::TouchRotate { direction, .. } => Trigger::TouchRotate { fingers: new_fingers, direction },
-                Trigger::TouchTap { .. } => Trigger::TouchTap { fingers: new_fingers },
-                Trigger::TouchTapHoldDrag { direction, .. } => {
-                    Trigger::TouchTapHoldDrag { fingers: new_fingers, direction }
-                }
+                Trigger::TouchSwipe { direction, .. } => Trigger::TouchSwipe {
+                    fingers: new_fingers,
+                    direction,
+                },
+                Trigger::TouchPinch { direction, .. } => Trigger::TouchPinch {
+                    fingers: new_fingers,
+                    direction,
+                },
+                Trigger::TouchRotate { direction, .. } => Trigger::TouchRotate {
+                    fingers: new_fingers,
+                    direction,
+                },
+                Trigger::TouchTap { .. } => Trigger::TouchTap {
+                    fingers: new_fingers,
+                },
+                Trigger::TouchTapHoldDrag { direction, .. } => Trigger::TouchTapHoldDrag {
+                    fingers: new_fingers,
+                    direction,
+                },
                 other => other,
             });
             if !ok {
@@ -725,15 +928,24 @@ fn add_direction_row(
     let (labels, selected): (Vec<&str>, u32) = match trigger {
         Trigger::TouchSwipe { direction, .. } => (
             SwipeDir::ALL.iter().map(|d| d.display()).collect(),
-            SwipeDir::ALL.iter().position(|d| *d == direction).unwrap_or(0) as u32,
+            SwipeDir::ALL
+                .iter()
+                .position(|d| *d == direction)
+                .unwrap_or(0) as u32,
         ),
         Trigger::TouchPinch { direction, .. } => (
             PinchDir::ALL.iter().map(|d| d.display()).collect(),
-            PinchDir::ALL.iter().position(|d| *d == direction).unwrap_or(0) as u32,
+            PinchDir::ALL
+                .iter()
+                .position(|d| *d == direction)
+                .unwrap_or(0) as u32,
         ),
         Trigger::TouchRotate { direction, .. } => (
             RotateDir::ALL.iter().map(|d| d.display()).collect(),
-            RotateDir::ALL.iter().position(|d| *d == direction).unwrap_or(0) as u32,
+            RotateDir::ALL
+                .iter()
+                .position(|d| *d == direction)
+                .unwrap_or(0) as u32,
         ),
         Trigger::TouchTapHoldDrag { direction, .. } => {
             let mut l = vec!["Any"];
@@ -761,7 +973,9 @@ fn add_direction_row(
         let row_ref = row.clone();
         let dir_ref = dir_combo.clone();
         dir_combo.connect_selected_notify(move |combo| {
-            if suppress.get() { return; }
+            if suppress.get() {
+                return;
+            }
             let idx = combo.selected() as usize;
             let ok = try_update_trigger(&settings, &current_key, &row_ref, |t| match t {
                 Trigger::TouchSwipe { fingers, .. } => Trigger::TouchSwipe {
@@ -792,15 +1006,18 @@ fn add_direction_row(
                 let s = settings.borrow();
                 if let Some(b) = s.binds.iter().find(|b| b.trigger.key() == key) {
                     let old_idx = match b.trigger {
-                        Trigger::TouchSwipe { direction, .. } => {
-                            SwipeDir::ALL.iter().position(|d| *d == direction).unwrap_or(0)
-                        }
-                        Trigger::TouchPinch { direction, .. } => {
-                            PinchDir::ALL.iter().position(|d| *d == direction).unwrap_or(0)
-                        }
-                        Trigger::TouchRotate { direction, .. } => {
-                            RotateDir::ALL.iter().position(|d| *d == direction).unwrap_or(0)
-                        }
+                        Trigger::TouchSwipe { direction, .. } => SwipeDir::ALL
+                            .iter()
+                            .position(|d| *d == direction)
+                            .unwrap_or(0),
+                        Trigger::TouchPinch { direction, .. } => PinchDir::ALL
+                            .iter()
+                            .position(|d| *d == direction)
+                            .unwrap_or(0),
+                        Trigger::TouchRotate { direction, .. } => RotateDir::ALL
+                            .iter()
+                            .position(|d| *d == direction)
+                            .unwrap_or(0),
                         Trigger::TouchTapHoldDrag { direction, .. } => match direction {
                             None => 0,
                             Some(d) => 1 + SwipeDir::ALL.iter().position(|x| *x == d).unwrap_or(0),
@@ -830,7 +1047,12 @@ fn add_edge_row(
     let edge_combo = adw::ComboRow::builder()
         .title("Edge")
         .model(&edge_model)
-        .selected(Edge::ALL.iter().position(|e| *e == initial_edge).unwrap_or(0) as u32)
+        .selected(
+            Edge::ALL
+                .iter()
+                .position(|e| *e == initial_edge)
+                .unwrap_or(0) as u32,
+        )
         .build();
 
     let zone_labels = zone_labels_for(initial_edge);
@@ -854,11 +1076,16 @@ fn add_edge_row(
         let edge_ref = edge_combo.clone();
         let zone_ref = zone_combo.clone();
         edge_combo.connect_selected_notify(move |combo| {
-            if suppress.get() { return; }
+            if suppress.get() {
+                return;
+            }
             let idx = combo.selected() as usize;
             let new_edge = Edge::ALL[idx % Edge::ALL.len()];
             let ok = try_update_trigger(&settings, &current_key, &row_ref, |t| match t {
-                Trigger::TouchEdge { zone, .. } => Trigger::TouchEdge { edge: new_edge, zone },
+                Trigger::TouchEdge { zone, .. } => Trigger::TouchEdge {
+                    edge: new_edge,
+                    zone,
+                },
                 other => other,
             });
             if ok {
@@ -894,7 +1121,9 @@ fn add_edge_row(
         let row_ref = row.clone();
         let zone_ref = zone_combo.clone();
         zone_combo.connect_selected_notify(move |combo| {
-            if suppress.get() { return; }
+            if suppress.get() {
+                return;
+            }
             let idx = combo.selected() as usize;
             let new_zone = if idx == 0 {
                 None
@@ -902,7 +1131,10 @@ fn add_edge_row(
                 Some(EdgeZone::ALL[(idx - 1) % EdgeZone::ALL.len()])
             };
             let ok = try_update_trigger(&settings, &current_key, &row_ref, |t| match t {
-                Trigger::TouchEdge { edge, .. } => Trigger::TouchEdge { edge, zone: new_zone },
+                Trigger::TouchEdge { edge, .. } => Trigger::TouchEdge {
+                    edge,
+                    zone: new_zone,
+                },
                 other => other,
             });
             if !ok {
@@ -913,7 +1145,10 @@ fn add_edge_row(
                     if let Trigger::TouchEdge { zone, .. } = b.trigger {
                         let old_idx = match zone {
                             None => 0,
-                            Some(z) => (EdgeZone::ALL.iter().position(|zz| *zz == z).unwrap_or(0) + 1) as u32,
+                            Some(z) => {
+                                (EdgeZone::ALL.iter().position(|zz| *zz == z).unwrap_or(0) + 1)
+                                    as u32
+                            }
                         };
                         suppress.set(true);
                         zone_ref.set_selected(old_idx);
@@ -964,7 +1199,9 @@ fn build_add_form(
             3.0,
             MIN_FINGERS as f64,
             MAX_FINGERS as f64,
-            1.0, 1.0, 0.0,
+            1.0,
+            1.0,
+            0.0,
         ))
         .build();
     group.add(&fingers_row);
@@ -1034,9 +1271,7 @@ fn build_add_form(
         .build();
     group.add(&natural_row);
 
-    let tag_row = adw::EntryRow::builder()
-        .title("Tag")
-        .build();
+    let tag_row = adw::EntryRow::builder().title("Tag").build();
     group.add(&tag_row);
 
     // React to family changes: swap direction vocab / show/hide edge rows.
@@ -1051,7 +1286,9 @@ fn build_add_form(
                 Family::Swipe => {
                     fingers_row.set_visible(true);
                     dir_combo.set_visible(true);
-                    dir_combo.set_model(Some(&gtk::StringList::new(&["Up", "Down", "Left", "Right"])));
+                    dir_combo.set_model(Some(&gtk::StringList::new(&[
+                        "Up", "Down", "Left", "Right",
+                    ])));
                     dir_combo.set_selected(0);
                     edge_combo.set_visible(false);
                     zone_combo.set_visible(false);
@@ -1067,7 +1304,10 @@ fn build_add_form(
                 Family::Rotate => {
                     fingers_row.set_visible(true);
                     dir_combo.set_visible(true);
-                    dir_combo.set_model(Some(&gtk::StringList::new(&["Clockwise", "Counter-Clockwise"])));
+                    dir_combo.set_model(Some(&gtk::StringList::new(&[
+                        "Clockwise",
+                        "Counter-Clockwise",
+                    ])));
                     dir_combo.set_selected(0);
                     edge_combo.set_visible(false);
                     zone_combo.set_visible(false);
@@ -1186,18 +1426,27 @@ fn build_add_form(
             };
 
             let action_idx = action_combo.selected() as usize;
-            if action_idx >= ACTION_OPTIONS.len() { return }
+            if action_idx >= ACTION_OPTIONS.len() {
+                return;
+            }
             let action_name = ACTION_OPTIONS[action_idx].1.to_string();
 
             // Check for duplicates
             let key = trigger.key();
-            if settings.borrow().binds.iter().any(|b| b.trigger.key() == key) {
+            if settings
+                .borrow()
+                .binds
+                .iter()
+                .any(|b| b.trigger.key() == key)
+            {
                 return;
             }
 
             let action_args = if action_name == "spawn" {
                 let cmd = spawn_entry.text().to_string();
-                if cmd.is_empty() { return; }
+                if cmd.is_empty() {
+                    return;
+                }
                 vec![cmd]
             } else {
                 vec![]
@@ -1215,7 +1464,11 @@ fn build_add_form(
                     Some(sensitivity)
                 },
                 natural_scroll: natural_row.is_active(),
-                tag: if tag_text.is_empty() { None } else { Some(tag_text) },
+                tag: if tag_text.is_empty() {
+                    None
+                } else {
+                    Some(tag_text)
+                },
                 enabled: true,
             };
 

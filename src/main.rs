@@ -29,7 +29,11 @@ fn build_ui(app: &adw::Application) {
 
     // Top-level device switcher: Touchscreen | Touchpad
     let view_stack = adw::ViewStack::new();
-    let ts_page = view_stack.add_titled(&pages::touchscreen::build(), Some("touchscreen"), "Touchscreen");
+    let ts_page = view_stack.add_titled(
+        &pages::touchscreen::build(),
+        Some("touchscreen"),
+        "Touchscreen",
+    );
     ts_page.set_icon_name(Some("input-touchscreen-symbolic"));
     let tp_page = view_stack.add_titled(&pages::touchpad::build(), Some("touchpad"), "Touchpad");
     tp_page.set_icon_name(Some("input-touchpad-symbolic"));
@@ -55,7 +59,7 @@ fn build_ui(app: &adw::Application) {
          \u{2003}Replaces input { touchscreen {} } or input { touchpad {} }\n\
          \n\
          Gesture Binds → same include files, binds {} block\n\
-         \u{2003}Merges Touch*/Touchpad* binds into config.kdl binds {}"
+         \u{2003}Merges Touch*/Touchpad* binds into config.kdl binds {}",
     ));
     info_label.set_wrap(true);
     info_label.set_xalign(0.0);

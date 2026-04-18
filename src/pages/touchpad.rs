@@ -11,7 +11,11 @@ pub fn build() -> gtk::Box {
 
     let stack = gtk::Stack::new();
     stack.add_titled(&build_general(&settings), Some("general"), "Device");
-    stack.add_titled(&build_gestures(&settings), Some("gestures"), "Gesture Binds");
+    stack.add_titled(
+        &build_gestures(&settings),
+        Some("gestures"),
+        "Gesture Binds",
+    );
 
     let switcher = gtk::StackSwitcher::new();
     switcher.set_stack(Some(&stack));
@@ -132,14 +136,16 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
     page.add(&basic_group);
 
     // --- Scroll settings ---
-    let scroll_group = adw::PreferencesGroup::builder()
-        .title("Scrolling")
-        .build();
+    let scroll_group = adw::PreferencesGroup::builder().title("Scrolling").build();
 
     // Scroll Factor
     let sf_adj = gtk::Adjustment::new(
         settings.borrow().scroll_factor.unwrap_or(1.0),
-        0.1, 10.0, 0.1, 0.5, 0.0,
+        0.1,
+        10.0,
+        0.1,
+        0.5,
+        0.0,
     );
     let sf_row = adw::SpinRow::builder()
         .title("Scroll Factor")
@@ -157,7 +163,13 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
     scroll_group.add(&sf_row);
 
     // Scroll Method
-    let scroll_methods = gtk::StringList::new(&["Default", "Two Finger", "Edge", "On Button Down", "No Scroll"]);
+    let scroll_methods = gtk::StringList::new(&[
+        "Default",
+        "Two Finger",
+        "Edge",
+        "On Button Down",
+        "No Scroll",
+    ]);
     let current_scroll = match settings.borrow().scroll_method.as_deref() {
         Some("two-finger") => 1,
         Some("edge") => 2,
@@ -193,10 +205,7 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
         .build();
 
     // Accel Speed
-    let as_adj = gtk::Adjustment::new(
-        settings.borrow().accel_speed,
-        -1.0, 1.0, 0.1, 0.2, 0.0,
-    );
+    let as_adj = gtk::Adjustment::new(settings.borrow().accel_speed, -1.0, 1.0, 0.1, 0.2, 0.0);
     let as_row = adw::SpinRow::builder()
         .title("Acceleration Speed")
         .subtitle("Pointer speed (-1.0 slowest, 1.0 fastest)")
@@ -338,7 +347,11 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
         .subtitle("Libinput delta units of motion before a swipe commits")
         .adjustment(&gtk::Adjustment::new(
             settings.borrow().swipe_trigger_distance,
-            4.0, 100.0, 1.0, 5.0, 0.0,
+            4.0,
+            100.0,
+            1.0,
+            5.0,
+            0.0,
         ))
         .digits(1)
         .build();
@@ -355,10 +368,12 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
     // IPC progress scaling
     let ipc_group = adw::PreferencesGroup::builder()
         .title("IPC Progress")
-        .description("Controls progress scaling for external tools (libinput delta units).\n\
+        .description(
+            "Controls progress scaling for external tools (libinput delta units).\n\
              Noop gestures: progress directly drives the external app (1:1 sync).\n\
              Compositor actions (workspace switch, etc): progress is informational only — \
-             niri uses its own internal thresholds to decide when to commit.")
+             niri uses its own internal thresholds to decide when to commit.",
+        )
         .build();
 
     let progress_row = adw::SpinRow::builder()
@@ -366,7 +381,11 @@ fn build_general(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesPa
         .subtitle("Libinput delta units of swipe that map to IPC progress = 1.0")
         .adjustment(&gtk::Adjustment::new(
             settings.borrow().swipe_progress_distance,
-            10.0, 500.0, 5.0, 20.0, 0.0,
+            10.0,
+            500.0,
+            5.0,
+            20.0,
+            0.0,
         ))
         .digits(0)
         .build();
@@ -401,7 +420,10 @@ const TOUCHPAD_ACTION_OPTIONS: &[(&str, &str)] = &[
     ("Center Column", "center-column"),
     ("Toggle Floating", "toggle-window-floating"),
     ("Screenshot", "screenshot"),
-    ("Move Window to Workspace Down", "move-window-to-workspace-down"),
+    (
+        "Move Window to Workspace Down",
+        "move-window-to-workspace-down",
+    ),
     ("Move Window to Workspace Up", "move-window-to-workspace-up"),
     ("Focus Monitor Left", "focus-monitor-left"),
     ("Focus Monitor Right", "focus-monitor-right"),
@@ -414,7 +436,10 @@ fn display_action_name(action_name: &str, action_args: &[String]) -> String {
     if action_name == "spawn" && !action_args.is_empty() {
         return format!("Spawn: {}", action_args.join(" "));
     }
-    if let Some((display, _)) = TOUCHPAD_ACTION_OPTIONS.iter().find(|(_, k)| *k == action_name) {
+    if let Some((display, _)) = TOUCHPAD_ACTION_OPTIONS
+        .iter()
+        .find(|(_, k)| *k == action_name)
+    {
         return display.to_string();
     }
     action_name
@@ -440,7 +465,7 @@ fn build_gestures(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesP
     let info = adw::PreferencesGroup::builder()
         .description(
             "Writes to touchpad-gestures.kdl → merges into binds {}\n\
-             3+ finger gestures only. 2-finger scroll/pinch is handled by libinput."
+             3+ finger gestures only. 2-finger scroll/pinch is handled by libinput.",
         )
         .build();
     page.add(&info);
@@ -450,9 +475,11 @@ fn build_gestures(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesP
     let tracked_rows: Rc<RefCell<Vec<adw::ExpanderRow>>> = Rc::new(RefCell::new(Vec::new()));
 
     // Active binds group
-    let binds_group = Rc::new(adw::PreferencesGroup::builder()
-        .title("Active Binds")
-        .build());
+    let binds_group = Rc::new(
+        adw::PreferencesGroup::builder()
+            .title("Active Binds")
+            .build(),
+    );
 
     // Add new bind form (at top for easy access)
     let add_group = build_add_form(settings, &binds_group, &tracked_rows);
@@ -460,9 +487,7 @@ fn build_gestures(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesP
 
     // Search / filter entry — sits just above the Active Binds list
     let search_group = adw::PreferencesGroup::builder().build();
-    let search_row = adw::EntryRow::builder()
-        .title("Filter Binds")
-        .build();
+    let search_row = adw::EntryRow::builder().title("Filter Binds").build();
     search_row.add_prefix(&gtk::Image::from_icon_name("system-search-symbolic"));
     {
         let tracked_rows = tracked_rows.clone();
@@ -471,9 +496,8 @@ fn build_gestures(settings: &Rc<RefCell<TouchpadSettings>>) -> adw::PreferencesP
             for r in tracked_rows.borrow().iter() {
                 let title = r.title().to_string().to_lowercase();
                 let subtitle = r.subtitle().to_string().to_lowercase();
-                let visible = query.is_empty()
-                    || title.contains(&query)
-                    || subtitle.contains(&query);
+                let visible =
+                    query.is_empty() || title.contains(&query) || subtitle.contains(&query);
                 r.set_visible(visible);
             }
         });
@@ -515,7 +539,11 @@ where
         if new_key == key {
             return true;
         }
-        if s.binds.iter().enumerate().any(|(i, b)| i != idx && b.trigger.key() == new_key) {
+        if s.binds
+            .iter()
+            .enumerate()
+            .any(|(i, b)| i != idx && b.trigger.key() == new_key)
+        {
             return false;
         }
         s.binds[idx].trigger = new_trigger;
@@ -554,7 +582,10 @@ fn build_bind_row(
         let current_key = current_key.clone();
         enable_switch.connect_active_notify(move |switch| {
             let key = current_key.borrow().clone();
-            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+            if let Some(b) = settings
+                .borrow_mut()
+                .binds
+                .iter_mut()
                 .find(|b| b.trigger.key() == key)
             {
                 b.enabled = switch.is_active();
@@ -605,7 +636,10 @@ fn build_bind_row(
             dialog.connect_response(None, move |_, response| {
                 if response == "delete" {
                     let key = current_key.borrow().clone();
-                    settings.borrow_mut().binds.retain(|b| b.trigger.key() != key);
+                    settings
+                        .borrow_mut()
+                        .binds
+                        .retain(|b| b.trigger.key() != key);
                     save_and_reload(&settings);
                     group.remove(&row_clone);
                     tracked_rows.borrow_mut().retain(|r| r != &row_clone);
@@ -625,8 +659,7 @@ fn build_bind_row(
             add_fingers_row(&row, settings, &current_key, &suppress, fingers);
             add_direction_row(&row, settings, &current_key, &suppress, direction);
         }
-        Trigger::TouchpadTapHold { fingers }
-        | Trigger::TouchpadTapHoldDrag { fingers } => {
+        Trigger::TouchpadTapHold { fingers } | Trigger::TouchpadTapHoldDrag { fingers } => {
             add_fingers_row(&row, settings, &current_key, &suppress, fingers);
         }
         _ => {
@@ -642,7 +675,8 @@ fn build_bind_row(
         .model(&action_model)
         .build();
 
-    let current_idx = TOUCHPAD_ACTION_OPTIONS.iter()
+    let current_idx = TOUCHPAD_ACTION_OPTIONS
+        .iter()
         .position(|(_, k)| *k == bind.action_name)
         .unwrap_or(0) as u32;
     action_combo.set_selected(current_idx);
@@ -653,11 +687,16 @@ fn build_bind_row(
         let row_ref = row.clone();
         action_combo.connect_selected_notify(move |combo| {
             let idx = combo.selected() as usize;
-            if idx >= TOUCHPAD_ACTION_OPTIONS.len() { return; }
+            if idx >= TOUCHPAD_ACTION_OPTIONS.len() {
+                return;
+            }
             let new_action = TOUCHPAD_ACTION_OPTIONS[idx].1.to_string();
             let new_display = TOUCHPAD_ACTION_OPTIONS[idx].0;
             let key = current_key.borrow().clone();
-            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+            if let Some(b) = settings
+                .borrow_mut()
+                .binds
+                .iter_mut()
                 .find(|b| b.trigger.key() == key)
             {
                 b.action_name = new_action;
@@ -675,7 +714,11 @@ fn build_bind_row(
         .subtitle("Speed multiplier (continuous actions)")
         .adjustment(&gtk::Adjustment::new(
             bind.sensitivity.unwrap_or(1.0),
-            0.1, 5.0, 0.1, 0.5, 0.0,
+            0.1,
+            5.0,
+            0.1,
+            0.5,
+            0.0,
         ))
         .digits(1)
         .build();
@@ -685,7 +728,10 @@ fn build_bind_row(
         let settings = settings.clone();
         sens_row.connect_value_notify(move |spin| {
             let key = current_key.borrow().clone();
-            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+            if let Some(b) = settings
+                .borrow_mut()
+                .binds
+                .iter_mut()
                 .find(|b| b.trigger.key() == key)
             {
                 b.sensitivity = Some(spin.value());
@@ -707,7 +753,10 @@ fn build_bind_row(
         tag_row.connect_changed(move |entry| {
             let text = entry.text().to_string();
             let key = current_key.borrow().clone();
-            if let Some(b) = settings.borrow_mut().binds.iter_mut()
+            if let Some(b) = settings
+                .borrow_mut()
+                .binds
+                .iter_mut()
                 .find(|b| b.trigger.key() == key)
             {
                 b.tag = if text.is_empty() { None } else { Some(text) };
@@ -738,7 +787,9 @@ fn add_fingers_row(
             initial as f64,
             MIN_FINGERS as f64,
             MAX_FINGERS as f64,
-            1.0, 1.0, 0.0,
+            1.0,
+            1.0,
+            0.0,
         ))
         .build();
 
@@ -749,18 +800,21 @@ fn add_fingers_row(
         let row_ref = row.clone();
         let fingers_ref = fingers_row.clone();
         fingers_row.connect_value_notify(move |spin| {
-            if suppress.get() { return; }
+            if suppress.get() {
+                return;
+            }
             let new_fingers = spin.value() as u8;
             let ok = try_update_trigger(&settings, &current_key, &row_ref, |t| match t {
-                Trigger::TouchpadSwipe { direction, .. } => {
-                    Trigger::TouchpadSwipe { fingers: new_fingers, direction }
-                }
-                Trigger::TouchpadTapHold { .. } => {
-                    Trigger::TouchpadTapHold { fingers: new_fingers }
-                }
-                Trigger::TouchpadTapHoldDrag { .. } => {
-                    Trigger::TouchpadTapHoldDrag { fingers: new_fingers }
-                }
+                Trigger::TouchpadSwipe { direction, .. } => Trigger::TouchpadSwipe {
+                    fingers: new_fingers,
+                    direction,
+                },
+                Trigger::TouchpadTapHold { .. } => Trigger::TouchpadTapHold {
+                    fingers: new_fingers,
+                },
+                Trigger::TouchpadTapHoldDrag { .. } => Trigger::TouchpadTapHoldDrag {
+                    fingers: new_fingers,
+                },
                 other => other,
             });
             if !ok {
@@ -795,7 +849,12 @@ fn add_direction_row(
     let dir_combo = adw::ComboRow::builder()
         .title("Direction")
         .model(&model)
-        .selected(SwipeDir::ALL.iter().position(|d| *d == initial).unwrap_or(0) as u32)
+        .selected(
+            SwipeDir::ALL
+                .iter()
+                .position(|d| *d == initial)
+                .unwrap_or(0) as u32,
+        )
         .build();
 
     {
@@ -805,7 +864,9 @@ fn add_direction_row(
         let row_ref = row.clone();
         let dir_ref = dir_combo.clone();
         dir_combo.connect_selected_notify(move |combo| {
-            if suppress.get() { return; }
+            if suppress.get() {
+                return;
+            }
             let idx = combo.selected() as usize;
             let ok = try_update_trigger(&settings, &current_key, &row_ref, |t| match t {
                 Trigger::TouchpadSwipe { fingers, .. } => Trigger::TouchpadSwipe {
@@ -819,7 +880,8 @@ fn add_direction_row(
                 let s = settings.borrow();
                 if let Some(b) = s.binds.iter().find(|b| b.trigger.key() == key) {
                     if let Trigger::TouchpadSwipe { direction, .. } = b.trigger {
-                        let old_idx = SwipeDir::ALL.iter()
+                        let old_idx = SwipeDir::ALL
+                            .iter()
                             .position(|d| *d == direction)
                             .unwrap_or(0) as u32;
                         suppress.set(true);
@@ -863,7 +925,9 @@ fn build_add_form(
             3.0,
             MIN_FINGERS as f64,
             MAX_FINGERS as f64,
-            1.0, 1.0, 0.0,
+            1.0,
+            1.0,
+            0.0,
         ))
         .build();
     group.add(&fingers_row);
@@ -921,9 +985,7 @@ fn build_add_form(
         .build();
     group.add(&sens_row);
 
-    let tag_row = adw::EntryRow::builder()
-        .title("Tag")
-        .build();
+    let tag_row = adw::EntryRow::builder().title("Tag").build();
     group.add(&tag_row);
 
     // Add button
@@ -951,25 +1013,39 @@ fn build_add_form(
             let trigger = match family_idx {
                 0 => {
                     let dir_idx = dir_combo.selected() as usize;
-                    if dir_idx >= SwipeDir::ALL.len() { return }
-                    Trigger::TouchpadSwipe { fingers, direction: SwipeDir::ALL[dir_idx] }
+                    if dir_idx >= SwipeDir::ALL.len() {
+                        return;
+                    }
+                    Trigger::TouchpadSwipe {
+                        fingers,
+                        direction: SwipeDir::ALL[dir_idx],
+                    }
                 }
                 1 => Trigger::TouchpadTapHold { fingers },
                 _ => Trigger::TouchpadTapHoldDrag { fingers },
             };
 
             let action_idx = action_combo.selected() as usize;
-            if action_idx >= TOUCHPAD_ACTION_OPTIONS.len() { return }
+            if action_idx >= TOUCHPAD_ACTION_OPTIONS.len() {
+                return;
+            }
             let action_name = TOUCHPAD_ACTION_OPTIONS[action_idx].1.to_string();
 
             let key = trigger.key();
-            if settings.borrow().binds.iter().any(|b| b.trigger.key() == key) {
+            if settings
+                .borrow()
+                .binds
+                .iter()
+                .any(|b| b.trigger.key() == key)
+            {
                 return;
             }
 
             let action_args = if action_name == "spawn" {
                 let cmd = spawn_entry.text().to_string();
-                if cmd.is_empty() { return; }
+                if cmd.is_empty() {
+                    return;
+                }
                 vec![cmd]
             } else {
                 vec![]
@@ -987,7 +1063,11 @@ fn build_add_form(
                     Some(sensitivity)
                 },
                 natural_scroll: false,
-                tag: if tag_text.is_empty() { None } else { Some(tag_text) },
+                tag: if tag_text.is_empty() {
+                    None
+                } else {
+                    Some(tag_text)
+                },
                 enabled: true,
             };
 
@@ -1012,4 +1092,3 @@ fn build_add_form(
 
     group
 }
-
